@@ -85,7 +85,7 @@
     const res = await fetch(`/api${path}`, { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && S.token && path !== '/auth/login') { setAuth(null, null); }
-    if (!res.ok) { const e = new Error(data.error || 'generic'); e.code = data.error; throw e; }
+    if (!res.ok) { const e = new Error(data.error || 'generic'); e.code = data.error; e.data = data; throw e; }
     return data;
   }
   const errMsg = (e) => T(`err_${e.code}`) !== `err_${e.code}` ? T(`err_${e.code}`) : T('err_generic');
@@ -551,30 +551,94 @@
     };
   }
 
+  // ---- verification code step (shared by register / reset / phone change) ----
+  let resendTimer;
+  async function requestCode(phone, purpose) {
+    const r = await api('/auth/otp', { method: 'POST', body: { phone, purpose, lang: S.lang } });
+    if (r.dev_code) toast(T('devCode', { x: r.dev_code }));
+    return r;
+  }
+  function startResendCountdown(btn, seconds) {
+    clearInterval(resendTimer);
+    let left = seconds;
+    const tick = () => {
+      if (!document.body.contains(btn)) return clearInterval(resendTimer);
+      btn.disabled = left > 0;
+      btn.textContent = left > 0 ? T('resendIn', { x: left }) : T('resend');
+      if (left-- <= 0) clearInterval(resendTimer);
+    };
+    tick(); resendTimer = setInterval(tick, 1000);
+  }
+  const codeInput = () => `<div class="field"><label>${T('code')}</label><input class="input num otp-input" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="••••••"></div>`;
+  function errHtml(e) {
+    const extra = e.data && e.data.attempts_left != null ? ` ${T('attemptsLeft', { x: e.data.attempts_left })}` : '';
+    return `<div class="err">${esc(errMsg(e) + extra)}</div>`;
+  }
+
   function viewLogin(mode, next) {
     const reg = mode === 'register';
+    const reset = mode === 'reset';
+    const nextQ = next ? `?next=${encodeURIComponent(next)}` : '';
+    const subtitle = reset ? T('resetTitle') : reg ? T('register') : T('loginToContinue');
     app.innerHTML = `<div class="container"><form class="card form-card" id="authForm">
-      <div class="auth-title"><div class="logo"><span>${esc(S.settings.store_name || '')}</span><span class="dot"></span></div><p>${reg ? T('register') : T('loginToContinue')}</p></div>
+      <div class="auth-title"><div class="logo"><span>${esc(S.settings.store_name || '')}</span><span class="dot"></span></div><p>${subtitle}</p></div>
       <div id="authErr"></div>
       ${reg ? `<div class="field"><label>${T('name')}</label><input class="input" name="name" required autocomplete="name"></div>` : ''}
       <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" required placeholder="07xx xxx xxxx" autocomplete="tel" style="text-align:start"></div>
-      <div class="field"><label>${T('password')}</label><input class="input" name="password" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}"></div>
+      ${reset ? '' : `<div class="field"><label>${T('password')}</label><input class="input" name="password" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}"></div>`}
       ${reg ? `<div class="field"><label>${T('referralOpt')}</label><input class="input num" name="referral" style="text-transform:uppercase;text-align:start" value="${esc(store.get('ref', '') || '')}"></div>` : ''}
-      <button class="btn btn-primary btn-block" type="submit">${reg ? T('register') : T('login')}</button>
-      <div class="switch-link">${reg ? T('haveAccount') : T('noAccount')} <a href="#/${reg ? 'login' : 'register'}${next ? `?next=${esc(next)}` : ''}">${reg ? T('login') : T('register')}</a></div>
+      ${mode === 'login' ? `<div style="text-align:end;margin:-4px 0 14px"><a href="#/reset${nextQ}" style="color:var(--brand);font-weight:700;font-size:14px">${T('forgotPassword')}</a></div>` : ''}
+      <button class="btn btn-primary btn-block" type="submit">${reg || reset ? T('sendCode') : T('login')}</button>
+      <div class="switch-link">${reg ? T('haveAccount') : T('noAccount')} <a href="#/${reg ? 'login' : 'register'}${nextQ}">${reg ? T('login') : T('register')}</a></div>
     </form></div>`;
+    const finish = (r) => { setAuth(r.token, r.user); store.del('ref'); location.hash = next ? `#/${next}` : '#/profile'; };
     $('#authForm').onsubmit = async (e) => {
       e.preventDefault();
       const fd = Object.fromEntries(new FormData(e.target));
       const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
       try {
-        const r = await api(reg ? '/auth/register' : '/auth/login', { method: 'POST', body: fd });
-        setAuth(r.token, r.user);
-        store.del('ref');
-        location.hash = next ? `#/${next}` : '#/profile';
+        if (mode === 'login') return finish(await api('/auth/login', { method: 'POST', body: fd }));
+        const sent = await requestCode(fd.phone, reg ? 'register' : 'reset');
+        viewCodeStep(fd, mode, sent, finish);
       } catch (err) {
         btn.disabled = false;
-        $('#authErr').innerHTML = `<div class="err">${esc(errMsg(err))}</div>`;
+        $('#authErr').innerHTML = errHtml(err);
+      }
+    };
+  }
+
+  function viewCodeStep(fd, mode, sent, finish) {
+    const reset = mode === 'reset';
+    app.innerHTML = `<div class="container"><form class="card form-card" id="codeForm">
+      <div class="auth-title"><div class="empty" style="padding:0 0 12px"><div class="ic sq" style="margin-bottom:0">${I.shield}</div></div>
+        <h3 style="margin:0 0 6px">${T('verifyTitle')}</h3><p>${esc(T('codeSentTo', { x: fd.phone }))}</p></div>
+      <div id="codeErr"></div>
+      ${codeInput()}
+      ${reset ? `<div class="field"><label>${T('newPasswordReq')}</label><input class="input" name="password" type="password" required minlength="6" autocomplete="new-password"></div>` : ''}
+      <button class="btn btn-primary btn-block" type="submit">${T('verify')}</button>
+      <button class="btn btn-soft btn-block" type="button" id="resendBtn" style="margin-top:10px"></button>
+      <div class="switch-link"><a href="#" id="changeNum">${T('changeNumber')}</a></div>
+    </form></div>`;
+    const form = $('#codeForm');
+    form.querySelector('[name=code]').focus();
+    startResendCountdown($('#resendBtn'), sent.resend_in || 60);
+    $('#resendBtn').onclick = async () => {
+      try { const r = await requestCode(fd.phone, reset ? 'reset' : 'register'); $('#codeErr').innerHTML = ''; startResendCountdown($('#resendBtn'), r.resend_in || 60); }
+      catch (err) { $('#codeErr').innerHTML = errHtml(err); if (err.data && err.data.retry_in) startResendCountdown($('#resendBtn'), err.data.retry_in); }
+    };
+    $('#changeNum').onclick = (e) => { e.preventDefault(); viewLogin(mode, new URLSearchParams(location.hash.split('?')[1] || '').get('next')); };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const extra = Object.fromEntries(new FormData(form));
+      const btn = form.querySelector('button[type=submit]'); btn.disabled = true;
+      try {
+        const r = reset
+          ? await api('/auth/reset', { method: 'POST', body: { phone: fd.phone, code: extra.code, password: extra.password } })
+          : await api('/auth/register', { method: 'POST', body: { ...fd, code: extra.code } });
+        finish(r);
+      } catch (err) {
+        btn.disabled = false;
+        $('#codeErr').innerHTML = errHtml(err);
       }
     };
   }
@@ -710,16 +774,35 @@
       <div id="epErr"></div>
       <div class="field"><label>${T('name')}</label><input class="input" name="name" value="${esc(u.name)}" required></div>
       <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" value="${esc(u.phone)}" required style="text-align:start"></div>
+      <div id="epCode"></div>
       <div class="field"><label>${T('newPassword')}</label><input class="input" name="new_password" type="password" minlength="6" autocomplete="new-password"></div>
       <div class="field"><label>${T('currentPassword')}</label><input class="input" name="current_password" type="password" autocomplete="current-password"></div>
       <button class="btn btn-primary btn-block">${T('save')}</button>
     </form></div>`;
+    let codeSentFor = null;
     $('#epForm').onsubmit = async (e) => {
       e.preventDefault();
-      const body = Object.fromEntries(new FormData(e.target));
+      const form = e.target;
+      const body = Object.fromEntries(new FormData(form));
       if (!body.new_password) { delete body.new_password; delete body.current_password; }
-      try { const r = await api('/me', { method: 'PUT', body }); setAuth(S.token, r.user); toast(T('saved')); location.hash = '#/profile'; }
-      catch (err) { $('#epErr').innerHTML = `<div class="err">${esc(errMsg(err))}</div>`; }
+      const phoneChanged = body.phone.replace(/[^\d+]/g, '') !== u.phone;
+      try {
+        if (phoneChanged && codeSentFor !== body.phone) {
+          const sent = await requestCode(body.phone, 'change_phone');
+          codeSentFor = body.phone;
+          $('#epCode').innerHTML = `<div class="hint">${esc(T('phoneCodeHint'))}</div>${codeInput()}<button class="btn btn-soft btn-block" type="button" id="resendBtn" style="margin-bottom:14px"></button>`;
+          startResendCountdown($('#resendBtn'), sent.resend_in || 60);
+          $('#resendBtn').onclick = async () => {
+            try { const r = await requestCode(body.phone, 'change_phone'); startResendCountdown($('#resendBtn'), r.resend_in || 60); }
+            catch (err) { $('#epErr').innerHTML = errHtml(err); }
+          };
+          $('#epErr').innerHTML = '';
+          form.querySelector('[name=code]').focus();
+          return;
+        }
+        const r = await api('/me', { method: 'PUT', body });
+        setAuth(S.token, r.user); toast(T('saved')); location.hash = '#/profile';
+      } catch (err) { $('#epErr').innerHTML = errHtml(err); }
     };
   }
 
@@ -752,6 +835,7 @@
       case 'checkout': return viewCheckout();
       case 'login': return viewLogin('login', qs.get('next'));
       case 'register': return viewLogin('register', qs.get('next'));
+      case 'reset': return viewLogin('reset', qs.get('next'));
       case 'profile': return viewProfile();
       case 'orders': return viewOrders(p1);
       case 'order': return viewOrder(Number(p1));

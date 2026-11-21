@@ -3,9 +3,11 @@ const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const { db, tx, hashPassword, verifyPassword, newReferralCode, getSettings, setSetting, UPLOAD_DIR } = require('./db');
+const { sendOtp, verifyOtp, OtpError } = require('./sms');
 
 const app = express();
 app.disable('x-powered-by');
+if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY); // e.g. 1 behind Nginx / a PaaS, so rate limits see the real client IP
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -63,6 +65,35 @@ function createSession(userId) {
   return token;
 }
 
+// Send a verification code. purpose: register | reset | change_phone
+app.post('/api/auth/otp', wrap(async (req, res) => {
+  const phone = normPhone(req.body.phone);
+  const purpose = String(req.body.purpose || '');
+  if (phone.length < 7) throw new HttpError(400, 'invalid_input');
+  const exists = !!db.prepare('SELECT 1 FROM users WHERE phone = ?').get(phone);
+  if (purpose === 'register' && exists) throw new HttpError(409, 'phone_taken');
+  if (purpose === 'reset' && !exists) throw new HttpError(404, 'phone_not_found');
+  if (purpose === 'change_phone') {
+    if (!req.user) throw new HttpError(401, 'unauthorized');
+    if (exists) throw new HttpError(409, 'phone_taken');
+  }
+  const lang = ['ku', 'ar', 'en'].includes(req.body.lang) ? req.body.lang : 'ku';
+  res.json(await sendOtp({ phone, purpose, ip: req.ip, lang, storeName: getSettings().store_name }));
+}));
+
+app.post('/api/auth/reset', wrap((req, res) => {
+  rateLimit(req);
+  const phone = normPhone(req.body.phone);
+  const password = String(req.body.password || '');
+  if (password.length < 6) throw new HttpError(400, 'password_short');
+  const user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+  if (!user) throw new HttpError(404, 'phone_not_found');
+  verifyOtp({ phone, purpose: 'reset', code: req.body.code });
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id); // log out other devices
+  res.json({ token: createSession(user.id), user: publicUser(user) });
+}));
+
 app.post('/api/auth/register', wrap((req, res) => {
   rateLimit(req);
   const name = str(req.body.name, 80);
@@ -78,6 +109,7 @@ app.post('/api/auth/register', wrap((req, res) => {
     if (!r) throw new HttpError(400, 'invalid_referral');
     referredBy = r.id;
   }
+  verifyOtp({ phone, purpose: 'register', code: req.body.code });
   const id = Number(db.prepare('INSERT INTO users(name, phone, password_hash, referral_code, referred_by) VALUES(?,?,?,?,?)')
     .run(name, phone, hashPassword(password), newReferralCode(), referredBy).lastInsertRowid);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
@@ -174,7 +206,10 @@ app.get('/api/me', requireUser, wrap((req, res) => {
 app.put('/api/me', requireUser, wrap((req, res) => {
   const name = str(req.body.name, 80) || req.user.name;
   const phone = normPhone(req.body.phone) || req.user.phone;
-  if (phone !== req.user.phone && db.prepare('SELECT 1 FROM users WHERE phone = ? AND id != ?').get(phone, req.user.id)) throw new HttpError(409, 'phone_taken');
+  if (phone !== req.user.phone) {
+    if (db.prepare('SELECT 1 FROM users WHERE phone = ? AND id != ?').get(phone, req.user.id)) throw new HttpError(409, 'phone_taken');
+    verifyOtp({ phone, purpose: 'change_phone', code: req.body.code });
+  }
   db.prepare('UPDATE users SET name = ?, phone = ? WHERE id = ?').run(name, phone, req.user.id);
   if (req.body.new_password) {
     if (!verifyPassword(String(req.body.current_password || ''), req.user.password_hash)) throw new HttpError(401, 'wrong_credentials');
@@ -467,6 +502,10 @@ app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC, 'index.html')));
 // ---------------- errors ----------------
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.code, detail: err.detail });
+  if (err instanceof OtpError) {
+    const status = { otp_wait: 429, too_many_attempts: 429, otp_send_failed: 502 }[err.code] || 400;
+    return res.status(status).json({ error: err.code, retry_in: err.retry_in, attempts_left: err.attempts_left });
+  }
   if (err && err.type === 'entity.parse.failed') return res.status(400).json({ error: 'invalid_json' });
   if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'file_too_large' });
   console.error(err);
