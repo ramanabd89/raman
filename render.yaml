@@ -1,0 +1,19 @@
+# Render.com blueprint — free web service for previewing the store.
+# Note: on the free plan the disk is temporary, so data and uploaded images reset when the service restarts or redeploys.
+services:
+  - type: web
+    name: raman-mobile
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/settings
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ADMIN_PHONE
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
