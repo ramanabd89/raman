@@ -61,3 +61,11 @@ select.input.sm { height: 38px; padding: 0 10px; border-radius: 10px; font-size:
 .tabs-lang button { padding: 6px 14px; border-radius: 10px; background: #EEF0F4; font-weight: 700; font-size: 13px; }
 .tabs-lang button.active { background: var(--ink); color: #fff; }
 .muted { color: var(--muted); }
+.warn-box { border: 2px solid #FBE2D3; background: #FFFBF7; }
+.warn-row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.warn-row:last-child { border-bottom: 0; }
+.warn-row > div { flex: 1; }
+.var-table td { padding: 4px; }
+.var-table .input.sm { width: 100%; min-width: 80px; }
+.tfa-steps { padding-inline-start: 20px; line-height: 2; }
+.secret { display: inline-block; background: #F2F3F6; padding: 6px 10px; border-radius: 8px; font-size: 15px; letter-spacing: 1px; }

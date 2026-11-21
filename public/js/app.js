@@ -113,13 +113,18 @@
     const n = cartCount();
     $('#btnCart').innerHTML = I.basket + (n ? `<span class="badge-count num">${n}</span>` : '');
   }
-  function addToCart(p, qty = 1) {
-    if (p.stock <= 0) { toast(T('outOfStockMsg')); return; }
-    const ex = S.cart.find((i) => i.id === p.id);
+  const cartKey = (i) => `${i.id}:${i.variant_id || ''}`;
+  function addToCart(p, qty = 1, variant = null) {
+    if (p.has_variants && !variant) { location.hash = `#/product/${p.id}`; return; }
+    const stock = variant ? variant.stock : p.stock;
+    if (stock <= 0) { toast(T('outOfStockMsg')); return; }
+    const key = `${p.id}:${variant ? variant.id : ''}`;
+    const ex = S.cart.find((i) => cartKey(i) === key);
     const cur = ex ? ex.qty : 0;
-    if (cur + qty > p.stock) { toast(T('maxStock', { x: p.stock })); return; }
+    if (cur + qty > stock) { toast(T('maxStock', { x: stock })); return; }
     if (ex) ex.qty += qty;
-    else S.cart.push({ id: p.id, qty, name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en, price: p.price, image: p.image, stock: p.stock });
+    else S.cart.push({ id: p.id, variant_id: variant ? variant.id : null, variant_label: variant ? variant.label : null, qty,
+      name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en, price: variant ? variant.price : p.price, image: p.image, stock });
     saveCart();
     toast(T('added'));
   }
@@ -273,7 +278,7 @@
         <div class="body">
           <div class="nm">${esc(L(p, 'name'))}</div>
           <div class="foot">
-            <div class="prices">${money(p.price)}${off ? `<span class="old-price num">${fmt(p.old_price)}</span>` : ''}</div>
+            <div class="prices">${p.has_variants ? `<small style="color:var(--ink-2);font-weight:600">${T('from')}</small>` : ''}${money(p.price)}${off ? `<span class="old-price num">${fmt(p.old_price)}</span>` : ''}</div>
             <button class="add-btn" data-add="${p.id}" ${out ? 'disabled' : ''} aria-label="${esc(T('addToCart'))}">${I.plus}</button>
           </div>
         </div>
@@ -406,42 +411,57 @@
     let data;
     try { data = await api(`/products/${id}`); } catch { app.innerHTML = `<div class="empty"><h3>${T('noResults')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
     const p = data.product; productCache.set(p.id, p);
-    const off = p.old_price && p.old_price > p.price ? Math.round((1 - p.price / p.old_price) * 100) : 0;
+    const variants = p.variants || [];
+    let variant = variants.find((v) => v.stock > 0) || variants[0] || null;
     const gallery = [p.image, ...(p.images || [])].filter(Boolean);
-    const out = p.stock <= 0;
-    const stockCls = out ? 'out' : p.stock <= 3 ? 'low' : 'in';
-    const stockTxt = out ? T('soldOut') : p.stock <= 3 ? T('maxStock', { x: p.stock }) : T('inStock');
     let qty = 1;
     app.innerHTML = `${pageHead(esc(L(p, 'name')).slice(0, 40))}
       <div class="container">
         <div class="pd">
           <div class="pd-gallery">
-            <div class="main">${off ? `<span class="tag off end">-${off}%</span>` : ''}<img id="mainImg" src="${img(gallery[0])}" alt="${esc(L(p, 'name'))}"></div>
+            <div class="main"><span class="tag off end hidden" id="offTag"></span><img id="mainImg" src="${img(gallery[0])}" alt="${esc(L(p, 'name'))}"></div>
             ${gallery.length > 1 ? `<div class="thumbs">${gallery.map((g, i) => `<button class="${i === 0 ? 'active' : ''}" data-img="${img(g)}"><img src="${img(g)}" alt=""></button>`).join('')}</div>` : ''}
           </div>
           <div class="card pd-info">
             ${p.brand ? `<div class="brand">${esc(p.brand)}</div>` : ''}
             <h1>${esc(L(p, 'name'))}</h1>
-            <div class="prices">${money(p.price)}${off ? `<span class="old-price num">${fmt(p.old_price)}</span>` : ''}</div>
-            <div class="stock ${stockCls}">${stockTxt}</div>
+            <div class="prices" id="pdPrice"></div>
+            ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${variants.map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}</button>`).join('')}</div>` : ''}
+            <div class="stock" id="pdStock"></div>
             <div class="pd-actions">
-              ${out ? '' : `<div class="qty"><button id="qMinus">${I.minus}</button><span id="qVal" class="num">1</span><button id="qPlus">${I.plus}</button></div>`}
-              <button class="btn btn-primary" id="addBtn" ${out ? 'disabled' : ''}>${I.basket}${T('addToCart')}</button>
+              <div class="qty" id="qtyBox"><button id="qMinus">${I.minus}</button><span id="qVal" class="num">1</span><button id="qPlus">${I.plus}</button></div>
+              <button class="btn btn-primary" id="addBtn">${I.basket}${T('addToCart')}</button>
             </div>
             ${L(p, 'desc') ? `<div class="pd-desc"><h3>${T('description')}</h3><p>${esc(L(p, 'desc'))}</p></div>` : ''}
           </div>
         </div>
         ${data.related.length ? `<div class="section-title">${T('related')}</div><div class="grid">${data.related.map(productCard).join('')}</div>` : ''}
       </div>`;
+    const render = () => {
+      const price = variant ? variant.price : p.price;
+      const old = variant ? variant.old_price : p.old_price;
+      const stock = variant ? variant.stock : p.stock;
+      const off = old && old > price ? Math.round((1 - price / old) * 100) : 0;
+      $('#pdPrice').innerHTML = `${money(price)}${off ? `<span class="old-price num">${fmt(old)}</span>` : ''}`;
+      $('#offTag').textContent = `-${off}%`; $('#offTag').classList.toggle('hidden', !off);
+      const out = stock <= 0;
+      const st = $('#pdStock');
+      st.className = `stock ${out ? 'out' : stock <= 3 ? 'low' : 'in'}`;
+      st.textContent = out ? T('soldOut') : stock <= 3 ? T('maxStock', { x: stock }) : T('inStock');
+      $('#addBtn').disabled = out;
+      $('#qtyBox').classList.toggle('hidden', out);
+      qty = Math.max(1, Math.min(qty, stock || 1)); $('#qVal').textContent = qty;
+      app.querySelectorAll('[data-variant]').forEach((b) => b.classList.toggle('active', variant && Number(b.dataset.variant) === variant.id));
+    };
+    render();
+    app.querySelectorAll('[data-variant]').forEach((b) => b.addEventListener('click', () => { variant = variants.find((v) => v.id === Number(b.dataset.variant)); qty = 1; render(); }));
     app.querySelectorAll('[data-img]').forEach((b) => b.addEventListener('click', () => {
       $('#mainImg').src = b.dataset.img;
       app.querySelectorAll('[data-img]').forEach((x) => x.classList.toggle('active', x === b));
     }));
-    if (!out) {
-      $('#qMinus').onclick = () => { qty = Math.max(1, qty - 1); $('#qVal').textContent = qty; };
-      $('#qPlus').onclick = () => { qty = Math.min(p.stock, qty + 1); $('#qVal').textContent = qty; };
-      $('#addBtn').onclick = () => addToCart(p, qty);
-    }
+    $('#qMinus').onclick = () => { qty = Math.max(1, qty - 1); $('#qVal').textContent = qty; };
+    $('#qPlus').onclick = () => { qty = Math.min(variant ? variant.stock : p.stock, qty + 1); $('#qVal').textContent = qty; };
+    $('#addBtn').onclick = () => addToCart(p, qty, variant);
   }
 
   function viewCart() {
@@ -460,10 +480,10 @@
         <div>${S.cart.map((i) => `
           <div class="card cart-item">
             <a href="#/product/${i.id}"><img src="${img(i.image)}" alt=""></a>
-            <div class="info"><div class="nm">${esc(L(i, 'name'))}</div>${money(i.price)}</div>
+            <div class="info"><div class="nm">${esc(L(i, 'name'))}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}${money(i.price)}</div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
-              <button class="rm-btn" data-rm="${i.id}" aria-label="${esc(T('delete'))}">${I.trash}</button>
-              <div class="qty"><button data-dec="${i.id}">${I.minus}</button><span class="num">${i.qty}</span><button data-inc="${i.id}">${I.plus}</button></div>
+              <button class="rm-btn" data-rm="${esc(cartKey(i))}" aria-label="${esc(T('delete'))}">${I.trash}</button>
+              <div class="qty"><button data-dec="${esc(cartKey(i))}">${I.minus}</button><span class="num">${i.qty}</span><button data-inc="${esc(cartKey(i))}">${I.plus}</button></div>
             </div>
           </div>`).join('')}</div>
         <div class="card summary">
@@ -476,11 +496,11 @@
       </div>`;
     app.onclick = (e) => {
       const b = e.target.closest('[data-inc],[data-dec],[data-rm]'); if (!b) return;
-      const id = Number(b.dataset.inc || b.dataset.dec || b.dataset.rm);
-      const it = S.cart.find((x) => x.id === id); if (!it) return;
+      const key = b.dataset.inc || b.dataset.dec || b.dataset.rm;
+      const it = S.cart.find((x) => cartKey(x) === key); if (!it) return;
       if (b.dataset.inc) { if (it.qty < (it.stock || 99)) it.qty++; else toast(T('maxStock', { x: it.stock })); }
       if (b.dataset.dec) it.qty = Math.max(1, it.qty - 1);
-      if (b.dataset.rm) S.cart = S.cart.filter((x) => x.id !== id);
+      if (b.dataset.rm) S.cart = S.cart.filter((x) => cartKey(x) !== key);
       saveCart(); viewCart();
     };
   }
@@ -512,7 +532,7 @@
           ${user.wallet > 0 ? `<label class="check" id="walletChk"><input type="checkbox" name="use_wallet"> ${esc(T('useWallet', { x: `${fmt(user.wallet)} ${T('currency')}` }))}</label>` : ''}
         </form>
         <div class="card summary">
-          ${S.cart.map((i) => `<div class="sum-row"><span>${esc(L(i, 'name'))} × <span class="num">${i.qty}</span></span><span class="num">${fmt(i.price * i.qty)}</span></div>`).join('')}
+          ${S.cart.map((i) => `<div class="sum-row"><span>${esc(L(i, 'name'))}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × <span class="num">${i.qty}</span></span><span class="num">${fmt(i.price * i.qty)}</span></div>`).join('')}
           <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('delivery')}</span>${delivery ? money(delivery) : `<b style="color:var(--green)">${T('free')}</b>`}</div>
           <div class="sum-row hidden" id="walletRow"><span>${T('walletUsed')}</span><span class="num" style="color:var(--green)" id="walletAmt"></span></div>
           <div class="sum-row total"><span>${T('total')}</span><span id="coTotal">${money(sub + delivery)}</span></div>
@@ -534,7 +554,7 @@
       const btn = $('#placeBtn'); btn.disabled = true;
       try {
         const order = await api('/orders', { method: 'POST', body: {
-          items: S.cart.map((i) => ({ id: i.id, qty: i.qty })),
+          items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id || undefined, qty: i.qty })),
           name: fd.get('name'), phone: fd.get('phone'), city: fd.get('city'), address: fd.get('address'), note: fd.get('note'), use_wallet: useWallet,
         } });
         if (!addresses.length) api('/me/addresses', { method: 'POST', body: { city: fd.get('city'), details: fd.get('address') } }).catch(() => {});
@@ -597,13 +617,30 @@
       const fd = Object.fromEntries(new FormData(e.target));
       const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
       try {
-        if (mode === 'login') return finish(await api('/auth/login', { method: 'POST', body: fd }));
+        if (mode === 'login') {
+          const r = await api('/auth/login', { method: 'POST', body: fd });
+          return r.need_2fa ? viewTwoFactor(r.ticket, finish) : finish(r);
+        }
         const sent = await requestCode(fd.phone, reg ? 'register' : 'reset');
         viewCodeStep(fd, mode, sent, finish);
       } catch (err) {
         btn.disabled = false;
         $('#authErr').innerHTML = errHtml(err);
       }
+    };
+  }
+
+  function viewTwoFactor(ticket, finish) {
+    app.innerHTML = `<div class="container"><form class="card form-card" id="tfaForm">
+      <div class="auth-title"><div class="empty" style="padding:0 0 12px"><div class="ic sq" style="margin-bottom:0">${I.shield}</div></div>
+        <h3 style="margin:0 0 6px">${T('twoFaTitle')}</h3><p>${T('twoFaSub')}</p></div>
+      <div id="tfaErr"></div>${codeInput()}
+      <button class="btn btn-primary btn-block" type="submit">${T('verify')}</button></form></div>`;
+    const form = $('#tfaForm'); form.querySelector('[name=code]').focus();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      try { finish(await api('/auth/login/2fa', { method: 'POST', body: { ticket, code: form.code.value } })); }
+      catch (err) { $('#tfaErr').innerHTML = errHtml(err); if (err.code === 'login_expired') setTimeout(() => viewLogin('login'), 1500); }
     };
   }
 
@@ -722,7 +759,7 @@
       <div class="container cart-layout">
         <div>
           ${o.status !== 'cancelled' ? `<div class="card" style="padding:18px 10px;margin-bottom:14px"><div class="timeline">${flow.map(([k, ic], i) => `<div class="step ${i <= idx ? 'done' : ''}"><div class="c">${ic}</div>${T(`st_${k}`)}</div>`).join('')}</div></div>` : ''}
-          ${o.items.map((i) => `<div class="card cart-item"><a href="#/product/${i.product_id}"><img src="${img(i.image)}" alt=""></a><div class="info"><div class="nm">${esc(i.name)}</div><span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
+          ${o.items.map((i) => `<div class="card cart-item"><a href="#/product/${i.product_id}"><img src="${img(i.image)}" alt=""></a><div class="info"><div class="nm">${esc(i.name)}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}<span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
         </div>
         <div class="card summary">
           <div class="sum-row"><span>${T('name')}</span><b>${esc(o.customer_name)}</b></div>

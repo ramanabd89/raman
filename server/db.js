@@ -114,6 +114,52 @@ CREATE INDEX IF NOT EXISTS idx_products_cat ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 `);
 
+
+// ---------- migrations (safe to run on every start) ----------
+function addColumn(table, col, def) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+addColumn('users', 'blocked', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'block_reason', 'TEXT');
+addColumn('users', 'totp_secret', 'TEXT');
+addColumn('users', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'admin_note', 'TEXT');
+addColumn('order_items', 'variant_id', 'INTEGER');
+addColumn('order_items', 'variant_label', 'TEXT');
+addColumn('orders', 'admin_note', 'TEXT');
+db.exec(`
+CREATE TABLE IF NOT EXISTS product_variants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  old_price INTEGER,
+  stock INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id);
+CREATE TABLE IF NOT EXISTS auth_failures (
+  key TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_failures ON auth_failures(key, ts);
+CREATE TABLE IF NOT EXISTS login_tickets (
+  ticket TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  user_name TEXT,
+  action TEXT NOT NULL,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
 // ---------- helpers ----------
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -261,5 +307,8 @@ function bannerSvg(c1, c2, kind) {
 }
 
 seed();
+for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '' })) {
+  if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(k) == null) setSetting(k, v);
+}
 
-module.exports = { db, tx, hashPassword, verifyPassword, newReferralCode, getSettings, setSetting, UPLOAD_DIR };
+module.exports = { db, tx, hashPassword, verifyPassword, newReferralCode, getSettings, setSetting, UPLOAD_DIR, DATA_DIR };

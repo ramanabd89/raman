@@ -3,7 +3,11 @@ const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const { db, tx, hashPassword, verifyPassword, newReferralCode, getSettings, setSetting, UPLOAD_DIR } = require('./db');
-const { sendOtp, verifyOtp, OtpError } = require('./sms');
+const fs = require('fs');
+const { sendOtp, verifyOtp, OtpError, PROVIDER: SMS_PROVIDER } = require('./sms');
+const { notify, orderMessage, escHtml, enabled: telegramEnabled } = require('./notify');
+const { startBackups, snapshot, listBackups, DIR: BACKUP_DIR } = require('./backup');
+const { newSecret, verifyTotp, otpauthUrl } = require('./totp');
 
 const app = express();
 app.disable('x-powered-by');
@@ -19,6 +23,9 @@ app.use((req, res, next) => {
 const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancelled'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
   'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone'];
+const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over'];
+const SESSION_DAYS = { customer: 30, admin: 7 };
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
 class HttpError extends Error { constructor(status, code) { super(code); this.status = status; this.code = code; } }
 const wrap = (fn) => (req, res, next) => { try { const r = fn(req, res, next); if (r && r.catch) r.catch(next); } catch (e) { next(e); } };
@@ -28,22 +35,40 @@ const normPhone = (p) => str(p, 20).replace(/[^\d+]/g, '');
 
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, name: u.name, phone: u.phone, role: u.role, wallet: u.wallet, referral_code: u.referral_code, avatar: u.avatar, created_at: u.created_at };
+  return { id: u.id, name: u.name, phone: u.phone, role: u.role, wallet: u.wallet, referral_code: u.referral_code, avatar: u.avatar, created_at: u.created_at, totp_enabled: !!u.totp_enabled };
 }
 function productOut(p) {
   if (!p) return p;
   let images = [];
   try { images = JSON.parse(p.images || '[]'); } catch { images = []; }
-  return { ...p, images, featured: !!p.featured, trending: !!p.trending, flash_sale: !!p.flash_sale, active: !!p.active };
+  return { ...p, images, featured: !!p.featured, trending: !!p.trending, flash_sale: !!p.flash_sale, active: !!p.active, has_variants: p.variant_count > 0 };
 }
+const variantsOf = (productId) => db.prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY sort, id').all(productId);
+function attachVariants(list) {
+  const ids = list.filter((p) => p.has_variants).map((p) => p.id);
+  if (!ids.length) return list;
+  const rows = db.prepare(`SELECT * FROM product_variants WHERE product_id IN (${ids.map(() => '?').join(',')}) ORDER BY sort, id`).all(...ids);
+  for (const p of list) p.variants = rows.filter((v) => v.product_id === p.id);
+  return list;
+}
+// Keep products.price/old_price/stock equal to the cheapest variant / total variant stock so sorting and listing stay simple.
+function syncProductFromVariants(productId) {
+  const vs = variantsOf(productId);
+  if (!vs.length) return;
+  const cheapest = vs.reduce((a, v) => (v.price < a.price ? v : a), vs[0]);
+  db.prepare('UPDATE products SET price = ?, old_price = ?, stock = ? WHERE id = ?')
+    .run(cheapest.price, cheapest.old_price, vs.reduce((a, v) => a + v.stock, 0), productId);
+}
+const VARIANT_COUNT_SQL = '(SELECT COUNT(*) FROM product_variants v WHERE v.product_id = p.id) AS variant_count';
 
 // ---------------- auth ----------------
 function auth(req, _res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (token) {
-    const row = db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?').get(token);
-    if (row) { req.user = row; req.token = token; }
+    const row = db.prepare("SELECT u.*, julianday('now') - julianday(s.created_at) AS session_age FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?").get(token);
+    if (row && row.session_age <= (SESSION_DAYS[row.role] || 30)) { req.user = row; req.token = token; }
+    else if (row) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   }
   next();
 }
@@ -51,13 +76,18 @@ const requireUser = (req, _res, next) => (req.user ? next() : next(new HttpError
 const requireAdmin = (req, _res, next) => (req.user && req.user.role === 'admin' ? next() : next(new HttpError(403, 'forbidden')));
 app.use('/api', auth);
 
-const attempts = new Map(); // naive login rate limit per IP
-function rateLimit(req) {
-  const key = req.ip;
-  const now = Date.now();
-  const a = (attempts.get(key) || []).filter((t) => now - t < 15 * 60 * 1000);
-  if (a.length >= 20) throw new HttpError(429, 'too_many_attempts');
-  a.push(now); attempts.set(key, a);
+// Rate limiting stored in the database, so it survives restarts. Keys look like "ip:1.2.3.4" or "phone:0750...".
+const WINDOW_MS = 15 * 60 * 1000;
+const LIMITS = { ip: 30, phone: 8 };
+function failures(key) { return db.prepare('SELECT COUNT(*) n FROM auth_failures WHERE key = ? AND ts > ?').get(key, Date.now() - WINDOW_MS).n; }
+function checkLimit(keys) {
+  for (const k of keys) if (failures(k) >= LIMITS[k.split(':')[0]]) throw new HttpError(429, 'too_many_attempts');
+}
+function recordFailure(keys) { const ins = db.prepare('INSERT INTO auth_failures(key, ts) VALUES(?, ?)'); for (const k of keys) ins.run(k, Date.now()); }
+function rateLimit(req) { const k = [`ip:${req.ip}`]; checkLimit(k); recordFailure(k); } // generic throttle: counts every call
+function logAdmin(req, action, details) {
+  db.prepare('INSERT INTO admin_log(user_id, user_name, action, details) VALUES(?,?,?,?)')
+    .run(req.user ? req.user.id : null, req.user ? req.user.name : '', action, typeof details === 'string' ? details : JSON.stringify(details ?? ''));
 }
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
@@ -117,10 +147,35 @@ app.post('/api/auth/register', wrap((req, res) => {
 }));
 
 app.post('/api/auth/login', wrap((req, res) => {
-  rateLimit(req);
   const phone = normPhone(req.body.phone);
+  const keys = [`ip:${req.ip}`, `phone:${phone}`];
+  checkLimit(keys);
   const user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
-  if (!user || !verifyPassword(String(req.body.password || ''), user.password_hash)) throw new HttpError(401, 'wrong_credentials');
+  if (!user || !verifyPassword(String(req.body.password || ''), user.password_hash)) {
+    recordFailure(keys);
+    throw new HttpError(401, 'wrong_credentials');
+  }
+  db.prepare('DELETE FROM auth_failures WHERE key = ?').run(`phone:${phone}`);
+  if (user.totp_enabled) {
+    const ticket = crypto.randomBytes(24).toString('hex');
+    db.prepare('DELETE FROM login_tickets WHERE expires_at < ?').run(Date.now());
+    db.prepare('INSERT INTO login_tickets(ticket, user_id, expires_at) VALUES(?,?,?)').run(ticket, user.id, Date.now() + 5 * 60 * 1000);
+    return res.json({ need_2fa: true, ticket });
+  }
+  res.json({ token: createSession(user.id), user: publicUser(user) });
+}));
+
+// Second step for accounts with two-factor authentication (authenticator app code).
+app.post('/api/auth/login/2fa', wrap((req, res) => {
+  const t = db.prepare('SELECT * FROM login_tickets WHERE ticket = ?').get(String(req.body.ticket || ''));
+  if (!t || t.expires_at < Date.now() || t.attempts >= 5) throw new HttpError(401, 'login_expired');
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(t.user_id);
+  if (!user || !verifyTotp(user.totp_secret, req.body.code)) {
+    db.prepare('UPDATE login_tickets SET attempts = attempts + 1 WHERE ticket = ?').run(t.ticket);
+    recordFailure([`ip:${req.ip}`]);
+    throw new HttpError(401, 'wrong_2fa_code');
+  }
+  db.prepare('DELETE FROM login_tickets WHERE ticket = ?').run(t.ticket);
   res.json({ token: createSession(user.id), user: publicUser(user) });
 }));
 
@@ -175,18 +230,20 @@ function productQuery(q, { admin = false } = {}) {
   const order = sorts[q.sort] || sorts.foryou;
   const limit = Math.min(int(q.limit, 40), 200);
   const offset = Math.max(int(q.offset, 0), 0);
-  const sql = `SELECT p.* FROM products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
+  const sql = `SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
   return db.prepare(sql).all(...params, limit, offset).map(productOut);
 }
 
 app.get('/api/products', wrap((req, res) => res.json(productQuery(req.query))));
 
 app.get('/api/products/:id', wrap((req, res) => {
-  const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(int(req.params.id));
+  const p = db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.id = ? AND p.active = 1`).get(int(req.params.id));
   if (!p) throw new HttpError(404, 'not_found');
-  const related = db.prepare('SELECT * FROM products WHERE active = 1 AND category_id = ? AND id != ? ORDER BY sold DESC LIMIT 8')
+  const related = db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.category_id = ? AND p.id != ? ORDER BY p.sold DESC LIMIT 8`)
     .all(p.category_id, p.id).map(productOut);
-  res.json({ product: productOut(p), related });
+  const product = productOut(p);
+  product.variants = variantsOf(p.id);
+  res.json({ product, related });
 }));
 
 // ---------------- customer account ----------------
@@ -217,6 +274,28 @@ app.put('/api/me', requireUser, wrap((req, res) => {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(req.body.new_password)), req.user.id);
   }
   res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
+}));
+
+// Two-factor authentication (authenticator app) — offered in the admin panel.
+app.post('/api/me/2fa/setup', requireUser, wrap((req, res) => {
+  if (req.user.totp_enabled) throw new HttpError(400, 'already_enabled');
+  const secret = newSecret();
+  db.prepare('UPDATE users SET totp_secret = ? WHERE id = ?').run(secret, req.user.id);
+  res.json({ secret, otpauth: otpauthUrl(secret, req.user.phone, getSettings().store_name || 'Store') });
+}));
+app.post('/api/me/2fa/enable', requireUser, wrap((req, res) => {
+  if (!req.user.totp_secret || !verifyTotp(req.user.totp_secret, req.body.code)) throw new HttpError(400, 'wrong_2fa_code');
+  db.prepare('UPDATE users SET totp_enabled = 1 WHERE id = ?').run(req.user.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?').run(req.user.id, req.token); // sign out other devices
+  logAdmin(req, '2fa_enabled', '');
+  res.json({ ok: true });
+}));
+app.post('/api/me/2fa/disable', requireUser, wrap((req, res) => {
+  if (!verifyPassword(String(req.body.password || ''), req.user.password_hash)) throw new HttpError(401, 'wrong_credentials');
+  if (!verifyTotp(req.user.totp_secret, req.body.code)) throw new HttpError(400, 'wrong_2fa_code');
+  db.prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?').run(req.user.id);
+  logAdmin(req, '2fa_disabled', '');
+  res.json({ ok: true });
 }));
 
 app.get('/api/me/addresses', requireUser, wrap((req, res) => {
@@ -253,6 +332,13 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
   const address = str(req.body.address, 300);
   if (!items.length) throw new HttpError(400, 'cart_empty');
   if (!city || !address) throw new HttpError(400, 'invalid_input');
+  // Fake-order protection
+  if (req.user.blocked) throw new HttpError(403, 'account_blocked');
+  const maxPending = int(s.max_pending_orders, 2);
+  if (maxPending > 0) {
+    const pending = db.prepare("SELECT COUNT(*) n FROM orders WHERE user_id = ? AND status = 'pending'").get(req.user.id).n;
+    if (pending >= maxPending) throw new HttpError(400, 'too_many_pending');
+  }
 
   const order = tx(() => {
     let subtotal = 0;
@@ -261,9 +347,21 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
       const qty = Math.max(1, Math.min(int(it.qty, 1), 99));
       const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(int(it.id));
       if (!p) throw new HttpError(400, 'product_unavailable');
-      if (p.stock < qty) throw Object.assign(new HttpError(400, 'out_of_stock'), { detail: p.name_ku });
-      subtotal += p.price * qty;
-      lines.push({ p, qty });
+      const variants = variantsOf(p.id);
+      let price = p.price; let variant = null;
+      if (variants.length) {
+        variant = variants.find((v) => v.id === int(it.variant_id));
+        if (!variant) throw Object.assign(new HttpError(400, 'choose_variant'), { detail: p.name_ku });
+        if (variant.stock < qty) throw Object.assign(new HttpError(400, 'out_of_stock'), { detail: `${p.name_ku} (${variant.label})` });
+        price = variant.price;
+        db.prepare('UPDATE product_variants SET stock = stock - ? WHERE id = ?').run(qty, variant.id);
+      } else if (p.stock < qty) {
+        throw Object.assign(new HttpError(400, 'out_of_stock'), { detail: p.name_ku });
+      }
+      // Decrement inside the loop so a product listed twice cannot oversell.
+      db.prepare('UPDATE products SET stock = stock - ?, sold = sold + ? WHERE id = ?').run(qty, qty, p.id);
+      subtotal += price * qty;
+      lines.push({ p, qty, price, variant });
     }
     const freeOver = int(s.free_delivery_over, 0);
     const delivery = freeOver && subtotal >= freeOver ? 0 : int(s.delivery_fee, 0);
@@ -272,15 +370,17 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
     const total = subtotal + delivery - walletUsed;
     const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total)
       VALUES(?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, name, phone, city, address, str(req.body.note, 500), subtotal, delivery, walletUsed, total).lastInsertRowid);
-    const insItem = db.prepare('INSERT INTO order_items(order_id, product_id, name, image, price, qty) VALUES(?,?,?,?,?,?)');
-    for (const { p, qty } of lines) {
-      insItem.run(oid, p.id, p.name_ku, p.image, p.price, qty);
-      db.prepare('UPDATE products SET stock = stock - ?, sold = sold + ? WHERE id = ?').run(qty, qty, p.id);
+    const insItem = db.prepare('INSERT INTO order_items(order_id, product_id, variant_id, variant_label, name, image, price, qty) VALUES(?,?,?,?,?,?,?,?)');
+    for (const { p, qty, price, variant } of lines) {
+      insItem.run(oid, p.id, variant ? variant.id : null, variant ? variant.label : null, p.name_ku, p.image, price, qty);
     }
     if (walletUsed) db.prepare('UPDATE users SET wallet = wallet - ? WHERE id = ?').run(walletUsed, req.user.id);
     return db.prepare('SELECT * FROM orders WHERE id = ?').get(oid);
   });
-  res.json(orderWithItems(order));
+  const full = orderWithItems(order);
+  const highValue = int(s.confirm_over, 0) > 0 && order.total + order.wallet_used >= int(s.confirm_over, 0);
+  notify(orderMessage(order, full.items, { highValue, publicUrl: PUBLIC_URL }));
+  res.json(full);
 }));
 
 app.get('/api/orders', requireUser, wrap((req, res) => {
@@ -300,6 +400,7 @@ app.get('/api/orders/:id', requireUser, wrap((req, res) => {
 function cancelOrder(o) {
   for (const it of db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id)) {
     if (it.product_id) db.prepare('UPDATE products SET stock = stock + ?, sold = MAX(sold - ?, 0) WHERE id = ?').run(it.qty, it.qty, it.product_id);
+    if (it.variant_id) db.prepare('UPDATE product_variants SET stock = stock + ? WHERE id = ?').run(it.qty, it.variant_id);
   }
   if (o.wallet_used && o.user_id) db.prepare('UPDATE users SET wallet = wallet + ? WHERE id = ?').run(o.wallet_used, o.user_id);
 }
@@ -312,6 +413,7 @@ app.post('/api/orders/:id/cancel', requireUser, wrap((req, res) => {
     cancelOrder(o);
     db.prepare("UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(o.id);
   });
+  notify(`❌ الزبون ألغى الطلب #${o.id} — ${escHtml(o.customer_name)} (${escHtml(o.phone)})`);
   res.json(orderWithItems(db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id)));
 }));
 
@@ -330,12 +432,22 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)),
 });
+// Check the file really is an image (the browser-declared type can be faked).
+function looksLikeImage(file) {
+  const fd = fs.openSync(file, 'r'); const b = Buffer.alloc(12);
+  fs.readSync(fd, b, 0, 12, 0); fs.closeSync(fd);
+  return (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) // jpeg
+    || b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) // png
+    || b.subarray(0, 4).toString('latin1') === 'GIF8'
+    || (b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP');
+}
 admin.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'invalid_file' });
+  if (!looksLikeImage(req.file.path)) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: 'invalid_file' }); }
   res.json({ url: `/uploads/${req.file.filename}` });
 });
 
-admin.get('/stats', wrap((_req, res) => {
+admin.get('/stats', wrap((req, res) => {
   const one = (sql, ...p) => db.prepare(sql).get(...p);
   res.json({
     revenue: one("SELECT COALESCE(SUM(total + wallet_used),0) v FROM orders WHERE status = 'delivered'").v,
@@ -346,10 +458,26 @@ admin.get('/stats', wrap((_req, res) => {
     products: one('SELECT COUNT(*) v FROM products').v,
     low_stock: db.prepare('SELECT id, name_ku, stock FROM products WHERE stock <= 3 ORDER BY stock LIMIT 10').all(),
     top: db.prepare('SELECT id, name_ku, sold, price FROM products ORDER BY sold DESC LIMIT 5').all(),
-    recent: db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 8').all(),
+    recent: db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 8').all().map(adminOrderExtras),
+    warnings: [
+      verifyPassword('admin123', req.user.password_hash) && 'default_password',
+      !req.user.totp_enabled && 'no_2fa',
+      SMS_PROVIDER === 'console' && 'sms_console',
+      !telegramEnabled && 'no_telegram',
+    ].filter(Boolean),
   });
 }));
 
+function adminOrderExtras(o) {
+  const confirmOver = int(getSettings().confirm_over, 0);
+  const u = o.user_id ? db.prepare('SELECT blocked FROM users WHERE id = ?').get(o.user_id) : null;
+  return {
+    ...o,
+    high_value: confirmOver > 0 && o.total + o.wallet_used >= confirmOver,
+    customer_blocked: !!(u && u.blocked),
+    phone_cancelled: db.prepare("SELECT COUNT(*) n FROM orders WHERE phone = ? AND status = 'cancelled' AND id != ?").get(o.phone, o.id).n,
+  };
+}
 admin.get('/orders', wrap((req, res) => {
   const status = ORDER_STATUSES.includes(req.query.status) ? req.query.status : null;
   const q = str(req.query.q, 50);
@@ -357,7 +485,7 @@ admin.get('/orders', wrap((req, res) => {
   if (status) { where.push('status = ?'); params.push(status); }
   if (q) { where.push('(customer_name LIKE ? OR phone LIKE ? OR CAST(id AS TEXT) = ?)'); params.push(`%${q}%`, `%${q}%`, q); }
   const rows = db.prepare(`SELECT * FROM orders ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT 300`).all(...params);
-  res.json(rows.map(orderWithItems));
+  res.json(rows.map((o) => adminOrderExtras(orderWithItems(o))));
 }));
 
 admin.put('/orders/:id', wrap((req, res) => {
@@ -368,7 +496,7 @@ admin.put('/orders/:id', wrap((req, res) => {
   if (o.status === 'cancelled' && status !== 'cancelled') throw new HttpError(400, 'order_cancelled');
   tx(() => {
     if (status === 'cancelled' && o.status !== 'cancelled') cancelOrder(o);
-    db.prepare("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, o.id);
+    db.prepare("UPDATE orders SET status = ?, admin_note = COALESCE(?, admin_note), updated_at = datetime('now') WHERE id = ?").run(status, req.body.admin_note != null ? str(req.body.admin_note, 500) : null, o.id);
     // Referral reward: first delivered order of a referred customer credits the referrer.
     if (status === 'delivered' && o.user_id) {
       const u = db.prepare('SELECT * FROM users WHERE id = ?').get(o.user_id);
@@ -379,11 +507,12 @@ admin.put('/orders/:id', wrap((req, res) => {
       }
     }
   });
+  logAdmin(req, 'order_status', { order: o.id, from: o.status, to: status });
   res.json(orderWithItems(db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id)));
 }));
 
 // products
-admin.get('/products', wrap((req, res) => res.json(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true }))));
+admin.get('/products', wrap((req, res) => res.json(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true })))));
 const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'sold', 'active'];
 function productValues(b) {
   const v = {
@@ -397,23 +526,52 @@ function productValues(b) {
     featured: b.featured ? 1 : 0, trending: b.trending ? 1 : 0, flash_sale: b.flash_sale ? 1 : 0,
     sold: Math.max(0, int(b.sold)), active: b.active === false || b.active === 0 ? 0 : 1,
   };
+  v.variants = (Array.isArray(b.variants) ? b.variants : []).slice(0, 30).map((x, i) => ({
+    id: x.id ? int(x.id) : null, label: str(x.label, 80), price: Math.max(0, int(x.price)),
+    old_price: x.old_price ? Math.max(0, int(x.old_price)) : null, stock: Math.max(0, int(x.stock)), sort: i,
+  })).filter((x) => x.label && x.price);
+  if (v.variants.length) { v.price = Math.min(...v.variants.map((x) => x.price)); v.stock = v.variants.reduce((a, x) => a + x.stock, 0); }
   if (!v.name_ku || !v.price) throw new HttpError(400, 'invalid_input');
   return v;
 }
+function saveVariants(productId, variants) {
+  const keep = variants.filter((x) => x.id).map((x) => x.id);
+  db.prepare(`DELETE FROM product_variants WHERE product_id = ? ${keep.length ? `AND id NOT IN (${keep.map(() => '?').join(',')})` : ''}`).run(productId, ...keep);
+  for (const x of variants) {
+    const exists = x.id && db.prepare('SELECT 1 FROM product_variants WHERE id = ? AND product_id = ?').get(x.id, productId);
+    if (exists) db.prepare('UPDATE product_variants SET label=?, price=?, old_price=?, stock=?, sort=? WHERE id=?').run(x.label, x.price, x.old_price, x.stock, x.sort, x.id);
+    else db.prepare('INSERT INTO product_variants(product_id, label, price, old_price, stock, sort) VALUES(?,?,?,?,?,?)').run(productId, x.label, x.price, x.old_price, x.stock, x.sort);
+  }
+  syncProductFromVariants(productId);
+}
+const adminProduct = (id) => attachVariants([productOut(db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.id = ?`).get(id))])[0];
 admin.post('/products', wrap((req, res) => {
   const v = productValues(req.body);
-  const id = Number(db.prepare(`INSERT INTO products(${PRODUCT_FIELDS.join(',')}) VALUES(${PRODUCT_FIELDS.map(() => '?').join(',')})`)
-    .run(...PRODUCT_FIELDS.map((f) => v[f])).lastInsertRowid);
-  res.json(productOut(db.prepare('SELECT * FROM products WHERE id = ?').get(id)));
+  const id = tx(() => {
+    const pid = Number(db.prepare(`INSERT INTO products(${PRODUCT_FIELDS.join(',')}) VALUES(${PRODUCT_FIELDS.map(() => '?').join(',')})`)
+      .run(...PRODUCT_FIELDS.map((f) => v[f])).lastInsertRowid);
+    saveVariants(pid, v.variants);
+    return pid;
+  });
+  logAdmin(req, 'product_create', { id, name: v.name_ku, price: v.price });
+  res.json(adminProduct(id));
 }));
 admin.put('/products/:id', wrap((req, res) => {
   const v = productValues(req.body);
-  db.prepare(`UPDATE products SET ${PRODUCT_FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`)
-    .run(...PRODUCT_FIELDS.map((f) => v[f]), int(req.params.id));
-  res.json(productOut(db.prepare('SELECT * FROM products WHERE id = ?').get(int(req.params.id))));
+  const id = int(req.params.id);
+  const before = db.prepare('SELECT price, stock FROM products WHERE id = ?').get(id);
+  if (!before) throw new HttpError(404, 'not_found');
+  tx(() => {
+    db.prepare(`UPDATE products SET ${PRODUCT_FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...PRODUCT_FIELDS.map((f) => v[f]), id);
+    saveVariants(id, v.variants);
+  });
+  logAdmin(req, 'product_update', { id, name: v.name_ku, price: [before.price, v.price], stock: [before.stock, v.stock] });
+  res.json(adminProduct(id));
 }));
 admin.delete('/products/:id', wrap((req, res) => {
+  const p = db.prepare('SELECT name_ku FROM products WHERE id = ?').get(int(req.params.id));
   db.prepare('DELETE FROM products WHERE id = ?').run(int(req.params.id));
+  logAdmin(req, 'product_delete', { id: int(req.params.id), name: p && p.name_ku });
   res.json({ ok: true });
 }));
 
@@ -428,6 +586,7 @@ admin.post('/categories', wrap((req, res) => {
   const v = catValues(req.body);
   const id = Number(db.prepare('INSERT INTO categories(parent_id, name_ku, name_ar, name_en, image, sort) VALUES(?,?,?,?,?,?)')
     .run(v.parent_id, v.name_ku, v.name_ar, v.name_en, v.image, v.sort).lastInsertRowid);
+  logAdmin(req, 'category_create', { id, name: v.name_ku });
   res.json(db.prepare('SELECT * FROM categories WHERE id = ?').get(id));
 }));
 admin.put('/categories/:id', wrap((req, res) => {
@@ -440,6 +599,7 @@ admin.put('/categories/:id', wrap((req, res) => {
 }));
 admin.delete('/categories/:id', wrap((req, res) => {
   db.prepare('DELETE FROM categories WHERE id = ?').run(int(req.params.id));
+  logAdmin(req, 'category_delete', { id: int(req.params.id) });
   res.json({ ok: true });
 }));
 
@@ -457,6 +617,7 @@ admin.put('/banners/:id', wrap((req, res) => {
 }));
 admin.delete('/banners/:id', wrap((req, res) => {
   db.prepare('DELETE FROM banners WHERE id = ?').run(int(req.params.id));
+  logAdmin(req, 'banner_delete', { id: int(req.params.id) });
   res.json({ ok: true });
 }));
 
@@ -466,7 +627,11 @@ admin.get('/users', wrap((req, res) => {
   const rows = q
     ? db.prepare('SELECT * FROM users WHERE name LIKE ? OR phone LIKE ? ORDER BY id DESC LIMIT 300').all(`%${q}%`, `%${q}%`)
     : db.prepare('SELECT * FROM users ORDER BY id DESC LIMIT 300').all();
-  res.json(rows.map((u) => ({ ...publicUser(u), orders: db.prepare('SELECT COUNT(*) n FROM orders WHERE user_id = ?').get(u.id).n })));
+  res.json(rows.map((u) => ({
+    ...publicUser(u), blocked: !!u.blocked, block_reason: u.block_reason,
+    orders: db.prepare('SELECT COUNT(*) n FROM orders WHERE user_id = ?').get(u.id).n,
+    cancelled: db.prepare("SELECT COUNT(*) n FROM orders WHERE user_id = ? AND status = 'cancelled'").get(u.id).n,
+  })));
 }));
 admin.put('/users/:id', wrap((req, res) => {
   const id = int(req.params.id);
@@ -475,15 +640,48 @@ admin.put('/users/:id', wrap((req, res) => {
   const role = ['customer', 'admin'].includes(req.body.role) ? req.body.role : u.role;
   if (id === req.user.id && role !== 'admin') throw new HttpError(400, 'cannot_demote_self');
   const wallet = req.body.wallet != null ? Math.max(0, int(req.body.wallet)) : u.wallet;
-  db.prepare('UPDATE users SET role = ?, wallet = ? WHERE id = ?').run(role, wallet, id);
+  const blocked = req.body.blocked != null ? (req.body.blocked ? 1 : 0) : u.blocked;
+  if (id === req.user.id && blocked) throw new HttpError(400, 'cannot_demote_self');
+  const reason = req.body.block_reason != null ? str(req.body.block_reason, 200) : u.block_reason;
+  db.prepare('UPDATE users SET role = ?, wallet = ?, blocked = ?, block_reason = ? WHERE id = ?').run(role, wallet, blocked, reason, id);
+  const changes = {};
+  if (role !== u.role) changes.role = [u.role, role];
+  if (wallet !== u.wallet) changes.wallet = [u.wallet, wallet];
+  if (blocked !== u.blocked) changes.blocked = [!!u.blocked, !!blocked];
+  if (Object.keys(changes).length) logAdmin(req, 'user_update', { id, phone: u.phone, ...changes });
   res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
 }));
 
 // settings
 admin.get('/settings', wrap((_req, res) => res.json(getSettings())));
 admin.put('/settings', wrap((req, res) => {
-  for (const k of PUBLIC_SETTINGS) if (k in req.body) setSetting(k, str(req.body[k], 2000));
+  const before = getSettings();
+  const changed = {};
+  for (const k of ADMIN_SETTINGS) if (k in req.body) {
+    const v = str(req.body[k], 2000);
+    if ((before[k] ?? '') !== v) changed[k] = [before[k] ?? '', v];
+    setSetting(k, v);
+  }
+  if (Object.keys(changed).length) logAdmin(req, 'settings_update', changed);
   res.json(getSettings());
+}));
+
+admin.get('/log', wrap((_req, res) => res.json(db.prepare('SELECT * FROM admin_log ORDER BY id DESC LIMIT 300').all())));
+
+admin.get('/backups', wrap((_req, res) => res.json(listBackups())));
+admin.get('/backups/download', wrap((req, res) => {
+  const name = String(req.query.name || '');
+  let file;
+  if (name === 'now') {
+    file = snapshot(path.join(BACKUP_DIR, `manual-${Date.now()}.db`));
+    res.on('finish', () => fs.unlink(file, () => {}));
+  } else {
+    if (!/^store-\d{4}-\d{2}-\d{2}\.db$/.test(name)) throw new HttpError(400, 'invalid_input');
+    file = path.join(BACKUP_DIR, name);
+    if (!fs.existsSync(file)) throw new HttpError(404, 'not_found');
+  }
+  logAdmin(req, 'backup_download', name);
+  res.download(file, name === 'now' ? `store-${new Date().toISOString().slice(0, 16).replace(':', '-')}.db` : name);
 }));
 
 app.use('/api/admin', admin);
@@ -503,7 +701,7 @@ app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC, 'index.html')));
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.code, detail: err.detail });
   if (err instanceof OtpError) {
-    const status = { otp_wait: 429, too_many_attempts: 429, otp_send_failed: 502 }[err.code] || 400;
+    const status = { otp_wait: 429, too_many_attempts: 429, otp_send_failed: 502 }[err.code] || 400; // phone_not_allowed, otp_invalid, otp_expired → 400
     return res.status(status).json({ error: err.code, retry_in: err.retry_in, attempts_left: err.attempts_left });
   }
   if (err && err.type === 'entity.parse.failed') return res.status(400).json({ error: 'invalid_json' });
@@ -514,6 +712,11 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
+  startBackups();
+  setInterval(() => {
+    db.prepare("DELETE FROM sessions WHERE julianday('now') - julianday(created_at) > 30").run();
+    db.prepare('DELETE FROM auth_failures WHERE ts < ?').run(Date.now() - 24 * 3600 * 1000);
+  }, 3600 * 1000).unref();
   app.listen(PORT, () => console.log(`Store running on http://localhost:${PORT}  (admin: /admin)`));
 }
 module.exports = app;

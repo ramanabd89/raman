@@ -10,7 +10,7 @@
   let token = getTok();
 
   const ST = { pending: 'قيد الانتظار', preparing: 'قيد التجهيز', shipping: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
-  const ERR = { wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
+  const ERR = { wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
 
   async function api(path, opts = {}) {
     const headers = {};
@@ -42,7 +42,9 @@
     $('#lf').onsubmit = async (e) => {
       e.preventDefault();
       try {
-        const r = await api('/auth/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+        let r = await api('/auth/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+        if (r.need_2fa) r = await askTwoFactor(r.ticket);
+        if (!r) return;
         if (r.user.role !== 'admin') return showLogin(ERR.forbidden);
         token = r.token;
         localStorage.setItem('token', JSON.stringify(r.token)); localStorage.setItem('user', JSON.stringify(r.user));
@@ -51,9 +53,26 @@
     };
   }
 
+  function askTwoFactor(ticket) {
+    return new Promise((resolve) => {
+      root.innerHTML = `<div class="container"><form class="card form-card" id="tf" style="margin-top:60px">
+        <div class="auth-title"><div class="logo"><span>التحقق بخطوتين</span><span class="dot"></span></div><p>اكتب الرمز من تطبيق Authenticator</p></div>
+        <div id="tfErr"></div>
+        <div class="field"><input class="input num otp-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required placeholder="••••••"></div>
+        <button class="btn btn-primary btn-block">تأكيد</button></form></div>`;
+      const f = $('#tf'); f.code.focus();
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        try { resolve(await api('/auth/login/2fa', { method: 'POST', body: { ticket, code: f.code.value } })); }
+        catch (err) { $('#tfErr').innerHTML = `<div class="err">${esc(err.message)}</div>`; if (err.code === 'login_expired') setTimeout(() => { showLogin(); resolve(null); }, 1500); }
+      };
+    });
+  }
+
   // ---------- layout ----------
-  const NAV = [['dashboard', '📊 الرئيسية'], ['orders', '📦 الطلبات'], ['products', '📱 المنتجات'], ['categories', '🗂️ الأقسام'], ['banners', '🖼️ البانرات'], ['users', '👥 الزبائن'], ['settings', '⚙️ الإعدادات']];
+  const NAV = [['dashboard', '📊 الرئيسية'], ['orders', '📦 الطلبات'], ['products', '📱 المنتجات'], ['categories', '🗂️ الأقسام'], ['banners', '🖼️ البانرات'], ['users', '👥 الزبائن'], ['settings', '⚙️ الإعدادات'], ['security', '🔒 الأمان والنسخ']];
   function layout(active, title, actions = '') {
+    document.querySelectorAll('.modal-bg').forEach((m) => m.remove()); // close any open dialog when changing page
     root.innerHTML = `<div class="adm">
       <aside class="adm-side"><div class="logo"><span>لوحة التحكم</span><span class="dot"></span></div>
         <nav>${NAV.map(([k, l]) => `<a href="#/${k}" class="${k === active ? 'active' : ''}">${l}</a>`).join('')}</nav>
@@ -99,7 +118,14 @@
   async function dashboard() {
     const c = layout('dashboard', 'الرئيسية');
     const s = await api('/admin/stats');
-    c.innerHTML = `
+    const W = {
+      default_password: ['🔴', 'كلمة مرور المدير هي الافتراضية admin123', 'غيّرها فوراً من المتجر: الملف الشخصي ← تغيير الرقم والاسم.', '/#/edit-profile'],
+      no_2fa: ['🔴', 'التحقق بخطوتين غير مفعّل لحسابك', 'فعّله من صفحة الأمان — يحمي المتجر حتى لو سُرقت كلمة المرور.', '#/security'],
+      sms_console: ['🟠', 'رسائل التحقق في وضع التجربة', 'الرمز يظهر على الشاشة ولا يصل للزبون. اربط واتساب أو SMS (راجع README).', ''],
+      no_telegram: ['🟠', 'إشعارات الطلبات على تيليجرام غير مفعّلة', 'لن تعرف بالطلب الجديد إلا إذا فتحت اللوحة (راجع README: TELEGRAM_BOT_TOKEN).', ''],
+    };
+    const warnHtml = (s.warnings || []).length ? `<div class="card panel warn-box"><h3>قبل الافتتاح — يحتاج انتباهك</h3>${s.warnings.map((w) => { const [ic, t, d, link] = W[w] || ['⚠️', w, '', '']; return `<div class="warn-row"><span>${ic}</span><div><b>${t}</b><div class="muted">${d}</div></div>${link ? `<a class="sm-btn primary" href="${link}">إصلاح</a>` : ''}</div>`; }).join('')}</div>` : '';
+    c.innerHTML = warnHtml + `
       <div class="kpis">
         <div class="card kpi"><div class="lbl">المبيعات (طلبات مُسلّمة)</div><div class="val num">${fmt(s.revenue)} <small>د.ع</small></div></div>
         <div class="card kpi"><div class="lbl">كل الطلبات</div><div class="val num">${s.orders}</div></div>
@@ -124,9 +150,10 @@
     return `<table class="t"><thead><tr><th>#</th><th>الزبون</th><th>المدينة</th>${full ? '<th>المنتجات</th>' : ''}<th>المجموع</th><th>التاريخ</th><th>الحالة</th><th></th></tr></thead><tbody>
       ${list.map((o) => `<tr>
         <td class="num"><b>${o.id}</b></td>
-        <td>${esc(o.customer_name)}<br><a class="num muted" href="tel:${esc(o.phone)}">${esc(o.phone)}</a></td>
+        <td>${esc(o.customer_name)}<br><a class="num muted" href="tel:${esc(o.phone)}">${esc(o.phone)}</a>
+          <div>${o.high_value ? '<span class="pill" style="background:#FFF4E5;color:#D97706">💰 قيمة عالية — اتصل للتأكيد</span> ' : ''}${o.phone_cancelled ? `<span class="pill" style="background:var(--red-soft);color:var(--red)">⚠️ ${o.phone_cancelled} طلب ملغي سابقاً</span> ` : ''}${o.customer_blocked ? '<span class="pill" style="background:var(--ink);color:#fff">🚫 محظور</span>' : ''}</div></td>
         <td>${esc(o.city)}</td>
-        ${full ? `<td class="order-items">${(o.items || []).map((i) => `${esc(i.name)} × ${i.qty}`).join('<br>')}</td>` : ''}
+        ${full ? `<td class="order-items">${(o.items || []).map((i) => `${esc(i.name)}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × ${i.qty}`).join('<br>')}</td>` : ''}
         <td class="num"><b>${fmt(o.total)}</b></td>
         <td class="num muted" style="white-space:nowrap">${esc(o.created_at.slice(0, 16))}</td>
         <td><select class="input sm" data-status="${o.id}" ${o.status === 'cancelled' ? 'disabled' : ''}>${Object.entries(ST).map(([k, l]) => `<option value="${k}" ${k === o.status ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
@@ -151,7 +178,7 @@
           ${o.note ? `<tr><td>ملاحظة</td><td>${esc(o.note)}</td></tr>` : ''}
         </table>
         <h3 style="margin:16px 0 8px">المنتجات</h3>
-        <table class="t">${o.items.map((i) => `<tr><td><img src="${safeImg(i.image)}"></td><td>${esc(i.name)}</td><td class="num">${fmt(i.price)} × ${i.qty}</td><td class="num"><b>${fmt(i.price * i.qty)}</b></td></tr>`).join('')}</table>
+        <table class="t">${o.items.map((i) => `<tr><td><img src="${safeImg(i.image)}"></td><td>${esc(i.name)}${i.variant_label ? `<br><span class="muted">${esc(i.variant_label)}</span>` : ''}</td><td class="num">${fmt(i.price)} × ${i.qty}</td><td class="num"><b>${fmt(i.price * i.qty)}</b></td></tr>`).join('')}</table>
         <table class="t" style="margin-top:10px">
           <tr><td>المنتجات</td><td class="num">${fmt(o.subtotal)}</td></tr>
           <tr><td>التوصيل</td><td class="num">${fmt(o.delivery_fee)}</td></tr>
@@ -193,7 +220,7 @@
           <td><b>${esc(p.name_ku)}</b><br><span class="muted">${esc(p.name_en || '')}</span>
             <div>${p.featured ? '<span class="pill">مميز</span> ' : ''}${p.flash_sale ? '<span class="pill" style="background:var(--red-soft);color:var(--red)">تخفيض سريع</span> ' : ''}${p.trending ? '<span class="pill" style="background:#EEF0F4;color:var(--ink)">رائج</span>' : ''}</div></td>
           <td>${esc(catName(p.category_id))}</td>
-          <td class="num"><b>${fmt(p.price)}</b>${p.old_price ? `<br><s class="muted">${fmt(p.old_price)}</s>` : ''}</td>
+          <td class="num">${p.has_variants ? '<span class="muted">من </span>' : ''}<b>${fmt(p.price)}</b>${p.old_price ? `<br><s class="muted">${fmt(p.old_price)}</s>` : ''}${p.has_variants ? `<br><span class="muted">${p.variants.length} أنواع</span>` : ''}</td>
           <td class="num" style="font-weight:800;color:${p.stock === 0 ? 'var(--red)' : p.stock <= 3 ? '#D97706' : 'inherit'}">${p.stock}</td>
           <td class="num">${p.sold}</td>
           <td>${p.active ? '<span class="st delivered">ظاهر</span>' : '<span class="st cancelled">مخفي</span>'}</td>
@@ -237,6 +264,8 @@
         <div class="field"><label>السعر القديم (للخصم)</label><input class="input num" type="number" min="0" name="old_price" value="${p.old_price ?? ''}"></div>
         <div class="field"><label>المخزون</label><input class="input num" type="number" min="0" name="stock" value="${p.stock ?? 0}"></div>
         <div class="field"><label>عدد المبيعات (يظهر للزبون)</label><input class="input num" type="number" min="0" name="sold" value="${p.sold ?? 0}"></div>
+        <div class="field full"><label>الأنواع (السعة / اللون) — اختياري. إذا أضفت أنواعاً، السعر والمخزون يؤخذان منها</label>
+          <div id="variants"></div><button type="button" class="sm-btn" id="addVar">+ إضافة نوع</button></div>
         ${imgField('image', p.image, 'الصورة الرئيسية')}
         <div class="field full"><label>صور إضافية</label><label class="sm-btn" style="cursor:pointer;display:inline-block">+ إضافة صور<input type="file" accept="image/*" multiple hidden id="galUp"></label><div class="gallery-list" id="gal"></div></div>
         ${langFields('desc', p, 'الوصف', true)}
@@ -249,6 +278,23 @@
       </div>
       <button class="btn btn-primary btn-block">حفظ</button></form>`, (m, close) => {
       bindUploads(m); bindLangTabs(m);
+      let variants = (p.variants || []).map((v) => ({ ...v }));
+      const drawVars = () => {
+        const box = m.querySelector('#variants');
+        box.innerHTML = variants.length ? `<table class="t var-table"><thead><tr><th>النوع (مثل 256GB · أسود)</th><th>السعر</th><th>السعر القديم</th><th>المخزون</th><th></th></tr></thead><tbody>${variants.map((v, i) => `<tr>
+          <td><input class="input sm" dir="ltr" data-v="${i}" data-k="label" value="${esc(v.label || '')}"></td>
+          <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="price" value="${v.price ?? ''}"></td>
+          <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="old_price" value="${v.old_price ?? ''}"></td>
+          <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="stock" value="${v.stock ?? 0}"></td>
+          <td><button type="button" class="sm-btn danger" data-rmv="${i}">×</button></td></tr>`).join('')}</tbody></table>` : '';
+        box.querySelectorAll('[data-v]').forEach((inp) => inp.oninput = () => { variants[inp.dataset.v][inp.dataset.k] = inp.value; });
+        box.querySelectorAll('[data-rmv]').forEach((b) => b.onclick = () => { variants.splice(Number(b.dataset.rmv), 1); drawVars(); });
+        const hasV = variants.length > 0;
+        ['price', 'old_price', 'stock'].forEach((n) => { const el = m.querySelector(`[name=${n}]`); el.disabled = hasV; el.closest('.field').style.opacity = hasV ? .45 : 1; });
+        m.querySelector('[name=price]').required = !hasV;
+      };
+      drawVars();
+      m.querySelector('#addVar').onclick = () => { variants.push({ label: '', price: '', old_price: '', stock: 0 }); drawVars(); };
       const drawGal = () => {
         m.querySelector('#gal').innerHTML = gallery.map((g, i) => `<span><img src="${safeImg(g)}"><button type="button" data-rmg="${i}">×</button></span>`).join('');
         m.querySelectorAll('[data-rmg]').forEach((b) => b.onclick = () => { gallery.splice(Number(b.dataset.rmg), 1); drawGal(); });
@@ -264,6 +310,9 @@
         const body = Object.fromEntries(fd);
         ['active', 'featured', 'trending', 'flash_sale'].forEach((k) => { body[k] = fd.has(k); });
         body.images = gallery;
+        body.variants = variants.filter((v) => String(v.label).trim() && Number(v.price) > 0);
+        if (variants.length && !body.variants.length) return toast('أكمل اسم وسعر كل نوع');
+        if (body.variants.length) body.price = Math.min(...body.variants.map((v) => Number(v.price)));
         try {
           await api(isNew ? '/admin/products' : `/admin/products/${p.id}`, { method: isNew ? 'POST' : 'PUT', body });
           toast('تم الحفظ'); close(); done();
@@ -354,14 +403,23 @@
     const c = layout('users', 'الزبائن', '<input class="input" id="uq" placeholder="بحث بالاسم أو الرقم">');
     const load = async () => {
       const list = await api(`/admin/users?q=${encodeURIComponent($('#uq').value)}`);
-      c.innerHTML = `<div class="card panel"><table class="t"><thead><tr><th>#</th><th>الاسم</th><th>الموبايل</th><th>الطلبات</th><th>المحفظة (د.ع)</th><th>كود الدعوة</th><th>الصلاحية</th><th>تاريخ التسجيل</th></tr></thead><tbody>
-        ${list.map((u) => `<tr><td class="num">${u.id}</td><td><b>${esc(u.name)}</b></td><td class="num"><a href="tel:${esc(u.phone)}">${esc(u.phone)}</a></td><td class="num">${u.orders}</td>
+      c.innerHTML = `<div class="card panel"><table class="t"><thead><tr><th>#</th><th>الاسم</th><th>الموبايل</th><th>الطلبات</th><th>المحفظة (د.ع)</th><th>كود الدعوة</th><th>الصلاحية</th><th>الحظر</th><th>تاريخ التسجيل</th></tr></thead><tbody>
+        ${list.map((u) => `<tr><td class="num">${u.id}</td><td><b>${esc(u.name)}</b></td><td class="num"><a href="tel:${esc(u.phone)}">${esc(u.phone)}</a></td><td class="num">${u.orders}${u.cancelled ? `<br><span style="color:var(--red);font-size:12px">${u.cancelled} ملغي</span>` : ''}</td>
           <td><div class="row-actions"><input class="input sm num" style="width:110px;height:36px" type="number" min="0" value="${u.wallet}" data-wallet="${u.id}"><button class="sm-btn primary" data-save-wallet="${u.id}">حفظ</button></div></td>
           <td class="num">${esc(u.referral_code)}</td>
           <td><select class="input sm" data-role="${u.id}"><option value="customer" ${u.role === 'customer' ? 'selected' : ''}>زبون</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>مدير</option></select></td>
+          <td>${u.blocked ? `<span class="st cancelled" title="${esc(u.block_reason || '')}">محظور</span><br><button class="sm-btn" data-unblock="${u.id}" style="margin-top:4px">فك الحظر</button>` : `<button class="sm-btn danger" data-block="${u.id}">حظر</button>`}</td>
           <td class="num muted">${esc(u.created_at.slice(0, 10))}</td></tr>`).join('')}</tbody></table></div>`;
       c.querySelectorAll('[data-save-wallet]').forEach((b) => b.onclick = async () => {
         try { await api(`/admin/users/${b.dataset.saveWallet}`, { method: 'PUT', body: { wallet: c.querySelector(`[data-wallet="${b.dataset.saveWallet}"]`).value } }); toast('تم الحفظ'); } catch (e) { toast(e.message); }
+      });
+      c.querySelectorAll('[data-block]').forEach((b) => b.onclick = async () => {
+        const reason = prompt('سبب الحظر (مثلاً: رفض الاستلام 3 مرات). المحظور لا يستطيع إرسال طلبات:');
+        if (reason === null) return;
+        try { await api(`/admin/users/${b.dataset.block}`, { method: 'PUT', body: { blocked: true, block_reason: reason } }); toast('تم الحظر'); load(); } catch (e) { toast(e.message); }
+      });
+      c.querySelectorAll('[data-unblock]').forEach((b) => b.onclick = async () => {
+        try { await api(`/admin/users/${b.dataset.unblock}`, { method: 'PUT', body: { blocked: false } }); toast('تم فك الحظر'); load(); } catch (e) { toast(e.message); }
       });
       c.querySelectorAll('[data-role]').forEach((s) => s.onchange = async () => {
         if (s.value === 'admin' && !confirm('منح صلاحية المدير لهذا المستخدم؟')) { load(); return; }
@@ -384,6 +442,8 @@
       ${F('delivery_fee', 'أجور التوصيل (د.ع)', 'number')}
       ${F('free_delivery_over', 'توصيل مجاني للطلبات فوق (د.ع) — 0 للإلغاء', 'number')}
       ${F('referral_reward', 'مكافأة الدعوة (د.ع)', 'number')}
+      ${F('max_pending_orders', 'أقصى عدد طلبات «قيد الانتظار» لكل زبون (0 = بلا حد)', 'number')}
+      ${F('confirm_over', 'تنبيه «اتصل للتأكيد» للطلبات فوق (د.ع)', 'number')}
       <div class="field"><label>نهاية التخفيضات السريعة</label><input class="input" type="datetime-local" name="flash_sale_end" value="${toLocal(s.flash_sale_end)}"></div>
       <div class="field full"><label>المدن (افصل بفاصلة ,)</label><input class="input" name="cities" value="${esc(s.cities || '')}"></div>
       <div class="field full"><label>كلمات البحث الرائجة (افصل بفاصلة ,)</label><input class="input" name="search_tags" value="${esc(s.search_tags || '')}"></div>
@@ -400,8 +460,65 @@
     };
   }
 
+  // ---------- security: 2FA, backups, activity log ----------
+  async function security() {
+    const c = layout('security', 'الأمان والنسخ الاحتياطي');
+    const [me, backups, log] = await Promise.all([api('/me'), api('/admin/backups'), api('/admin/log')]);
+    const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil(b / 1024)} KB`);
+    const ACTIONS = { order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
+    c.innerHTML = `
+      <div class="card panel" id="tfaPanel"><h3>🔐 التحقق بخطوتين لحسابك</h3>
+        ${me.user.totp_enabled ? `<p><span class="st delivered">مفعّل ✓</span> عند الدخول يُطلب رمز من تطبيق Authenticator.</p>
+          <details><summary class="muted" style="cursor:pointer">إيقاف التحقق بخطوتين</summary><form id="tfaOff" class="toolbar" style="margin-top:10px">
+          <input class="input" type="password" name="password" placeholder="كلمة المرور" required><input class="input num" name="code" placeholder="الرمز" maxlength="6" required><button class="sm-btn danger">إيقاف</button></form></details>`
+        : `<p class="muted">بعد التفعيل، الدخول للوحة يحتاج كلمة المرور + رمز يتغير كل 30 ثانية من تطبيق على موبايلك (Google Authenticator أو Microsoft Authenticator).</p><button class="btn btn-primary" id="tfaStart">تفعيل</button><div id="tfaSetup"></div>`}
+      </div>
+      <div class="card panel"><h3>💾 النسخ الاحتياطي</h3>
+        <p class="muted">نسخة تلقائية كل يوم (آخر 14 يوماً) على نفس السيرفر. نزّل نسخة على جهازك أسبوعياً على الأقل — إذا تعطّل السيرفر تبقى النسخة عندك.</p>
+        <button class="btn btn-primary" data-dl="now">⬇ تنزيل نسخة الآن</button>
+        <table class="t" style="margin-top:12px">${backups.map((b) => `<tr><td class="num">${esc(b.name)}</td><td class="num muted">${fmtSize(b.size)}</td><td><button class="sm-btn" data-dl="${esc(b.name)}">تنزيل</button></td></tr>`).join('') || '<tr><td class="muted">لا توجد نسخ بعد</td></tr>'}</table>
+      </div>
+      <div class="card panel"><h3>📜 سجل عمليات المدراء</h3>
+        <table class="t"><thead><tr><th>الوقت</th><th>المدير</th><th>العملية</th><th>التفاصيل</th></tr></thead><tbody>
+        ${log.map((l) => `<tr><td class="num muted" style="white-space:nowrap">${esc(l.created_at)}</td><td>${esc(l.user_name)}</td><td>${esc(ACTIONS[l.action] || l.action)}</td><td class="num muted" style="font-size:12px;max-width:420px;word-break:break-word">${esc(l.details)}</td></tr>`).join('') || '<tr><td class="muted">لا يوجد</td></tr>'}
+        </tbody></table>
+      </div>`;
+    c.querySelectorAll('[data-dl]').forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const res = await fetch(`/api/admin/backups/download?name=${encodeURIComponent(b.dataset.dl)}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error('فشل التنزيل');
+        const name = (res.headers.get('content-disposition') || '').match(/filename="?([^"]+)"?/)?.[1] || 'store-backup.db';
+        const a = document.createElement('a'); a.href = URL.createObjectURL(await res.blob()); a.download = name; a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      } catch (e) { toast(e.message); }
+      b.disabled = false;
+    });
+    const start = $('#tfaStart');
+    if (start) start.onclick = async () => {
+      const r = await api('/me/2fa/setup', { method: 'POST' });
+      $('#tfaSetup').innerHTML = `<ol class="tfa-steps">
+          <li>نزّل تطبيق <b>Google Authenticator</b> أو <b>Microsoft Authenticator</b> على موبايلك.</li>
+          <li>امسح الرمز، أو إذا كنت على نفس الموبايل اضغط <a class="sm-btn primary" href="${esc(r.otpauth)}">فتح في التطبيق</a>، أو اكتب المفتاح يدوياً:
+            <div id="qr" style="margin:10px 0"></div><code class="num secret">${esc(r.secret.replace(/(.{4})/g, '$1 ').trim())}</code></li>
+          <li>اكتب الرمز الظاهر في التطبيق:</li></ol>
+        <form id="tfaOn" class="toolbar"><input class="input num otp-input" name="code" inputmode="numeric" maxlength="6" required placeholder="••••••" style="max-width:220px"><button class="btn btn-primary">تأكيد وتفعيل</button></form>`;
+      try { if (window.qrcode) { const q = window.qrcode(0, 'M'); q.addData(r.otpauth); q.make(); $('#qr').innerHTML = q.createSvgTag({ cellSize: 5, margin: 2 }); } } catch { /* QR optional */ }
+      $('#tfaOn').onsubmit = async (e) => {
+        e.preventDefault();
+        try { await api('/me/2fa/enable', { method: 'POST', body: { code: e.target.code.value } }); toast('تم تفعيل التحقق بخطوتين'); security(); } catch (err) { toast(err.message); }
+      };
+      start.remove();
+    };
+    const off = $('#tfaOff');
+    if (off) off.onsubmit = async (e) => {
+      e.preventDefault();
+      try { await api('/me/2fa/disable', { method: 'POST', body: Object.fromEntries(new FormData(off)) }); toast('تم الإيقاف'); security(); } catch (err) { toast(err.message); }
+    };
+  }
+
   // ---------- router ----------
-  const ROUTES = { dashboard, orders, products, categories, banners, users, settings };
+  const ROUTES = { dashboard, orders, products, categories, banners, users, settings, security };
   async function render() {
     if (!token) return showLogin();
     const key = (location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]) || 'dashboard';

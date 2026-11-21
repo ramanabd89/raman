@@ -41,6 +41,10 @@ window.I18N = {
     phoneCodeHint: 'ژمارەکەت گۆڕا — کۆدێکمان نارد بۆ ژمارە نوێیەکە', attemptsLeft: '({x} هەوڵ ماوە)',
     err_otp_invalid: 'کۆدەکە هەڵەیە', err_otp_expired: 'کۆدەکە بەسەرچووە، کۆدێکی نوێ داوا بکە', err_otp_wait: 'تکایە چەند چرکەیەک چاوەڕێ بکە',
     err_otp_send_failed: 'ناردنی کۆد سەرکەوتوو نەبوو، دواتر هەوڵ بدەرەوە', err_phone_not_found: 'ئەم ژمارەیە تۆمار نەکراوە',
+    from: 'لە', chooseOption: 'جۆرێک هەڵبژێرە', twoFaTitle: 'پشتڕاستکردنەوەی دوو هەنگاو', twoFaSub: 'کۆدی ٦ ژمارەیی لە ئەپی Authenticator بنووسە',
+    err_account_blocked: 'هەژمارەکەت ڕاگیراوە، پەیوەندی بە پشتگیرییەوە بکە', err_too_many_pending: 'داواکارییەکی چاوەڕوانکراوت هەیە، تکایە چاوەڕێ بکە تا دڵنیا دەکرێتەوە',
+    err_choose_variant: 'تکایە جۆری بەرهەمەکە هەڵبژێرە', err_phone_not_allowed: 'تەنها ژمارەی عێراقی وەردەگیرێت', err_wrong_2fa_code: 'کۆدەکە هەڵەیە', err_login_expired: 'کاتەکە بەسەرچوو، دووبارە بچۆ ژوورەوە',
+    err_product_unavailable: 'بەرهەمێک لە سەبەتەکەت ئێستا بەردەست نییە',
     shareMsg: 'لە {s} داوای مۆبایل و ئەکسسوار بکە! کۆدی داوەتی من: {c}', bestQuality: 'باشترین کوالێتی و مۆدێل',
   },
   ar: {
@@ -84,6 +88,10 @@ window.I18N = {
     phoneCodeHint: 'غيّرت رقمك — أرسلنا رمزاً إلى الرقم الجديد', attemptsLeft: '(متبقي {x} محاولات)',
     err_otp_invalid: 'الرمز غير صحيح', err_otp_expired: 'انتهت صلاحية الرمز، اطلب رمزاً جديداً', err_otp_wait: 'يرجى الانتظار قليلاً قبل إعادة الإرسال',
     err_otp_send_failed: 'تعذر إرسال الرمز، حاول لاحقاً', err_phone_not_found: 'هذا الرقم غير مسجل',
+    from: 'من', chooseOption: 'اختر النوع', twoFaTitle: 'التحقق بخطوتين', twoFaSub: 'اكتب الرمز المكوّن من 6 أرقام من تطبيق Authenticator',
+    err_account_blocked: 'تم إيقاف حسابك، تواصل مع الدعم', err_too_many_pending: 'لديك طلبات قيد الانتظار، يرجى الانتظار حتى يتم تأكيدها',
+    err_choose_variant: 'يرجى اختيار نوع المنتج', err_phone_not_allowed: 'نقبل الأرقام العراقية فقط', err_wrong_2fa_code: 'الرمز غير صحيح', err_login_expired: 'انتهت المهلة، سجّل الدخول من جديد',
+    err_product_unavailable: 'أحد المنتجات في سلتك لم يعد متوفراً',
     shareMsg: 'اطلب موبايلات وإكسسوارات من {s}! كود الدعوة: {c}', bestQuality: 'أفضل جودة وأحدث موديلات',
   },
   en: {
@@ -127,6 +135,10 @@ window.I18N = {
     phoneCodeHint: 'You changed your number — we sent a code to the new one', attemptsLeft: '({x} attempts left)',
     err_otp_invalid: 'Wrong code', err_otp_expired: 'Code expired, request a new one', err_otp_wait: 'Please wait before requesting another code',
     err_otp_send_failed: 'Could not send the code, try again later', err_phone_not_found: 'This number is not registered',
+    from: 'From', chooseOption: 'Choose an option', twoFaTitle: 'Two-step verification', twoFaSub: 'Enter the 6-digit code from your authenticator app',
+    err_account_blocked: 'Your account is suspended, please contact support', err_too_many_pending: 'You already have pending orders, please wait until they are confirmed',
+    err_choose_variant: 'Please choose an option', err_phone_not_allowed: 'Only Iraqi phone numbers are accepted', err_wrong_2fa_code: 'Wrong code', err_login_expired: 'Session expired, please log in again',
+    err_product_unavailable: 'An item in your cart is no longer available',
     shareMsg: 'Order phones & accessories from {s}! My invite code: {c}', bestQuality: 'Best quality & latest models',
   },
 };

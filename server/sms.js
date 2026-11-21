@@ -32,6 +32,8 @@ const MAX_PER_PHONE_HOUR = 5;
 const MAX_PER_IP_HOUR = 20;
 const MAX_ATTEMPTS = 5;
 const PURPOSES = ['register', 'reset', 'change_phone'];
+// Only send to these country prefixes (protects against SMS-pumping fraud on international numbers).
+const ALLOWED_PREFIXES = (process.env.OTP_ALLOWED_PREFIXES || '+964').split(',').map((x) => x.trim()).filter(Boolean);
 
 if (PROVIDER === 'console' && IS_PROD) {
   console.warn('WARNING: SMS_PROVIDER=console in production — verification codes are only printed to this log, customers will not receive them.');
@@ -104,6 +106,8 @@ async function deliver(phone, code, lang, storeName) {
 /** Create and send a code. Returns { resend_in, expires_in, dev_code? }. */
 async function sendOtp({ phone, purpose, ip, lang, storeName }) {
   if (!PURPOSES.includes(purpose)) throw new OtpError('invalid_input');
+  const e164 = toE164(phone);
+  if (!ALLOWED_PREFIXES.some((pre) => e164.startsWith(pre)) || !/^\+\d{10,15}$/.test(e164)) throw new OtpError('phone_not_allowed');
   const now = Date.now();
   db.prepare('DELETE FROM otp_codes WHERE created_at < ?').run(now - 24 * 3600 * 1000);
 
