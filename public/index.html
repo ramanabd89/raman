@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ckb" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <title>Raman Mobile</title>
+  <meta name="description" content="Mobile phones & accessories — delivered to your door">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <a href="#/" class="logo"><span id="storeName">Raman Mobile</span><span class="dot"></span></a>
+      <nav class="desktop-nav" id="desktopNav"></nav>
+      <div class="header-actions">
+        <button class="icon-btn" id="btnSearch" aria-label="search"></button>
+        <span class="sep"></span>
+        <a class="icon-btn brand" id="btnCart" href="#/cart" aria-label="cart"></a>
+        <button class="icon-btn" id="btnMenu" aria-label="menu"></button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="logo"><span class="js-store-name">Raman Mobile</span><span class="dot"></span></div>
+      <div>© <span id="year"></span></div>
+    </div>
+  </footer>
+
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="searchSheet"></div>
+  <aside class="drawer" id="menuDrawer"></aside>
+  <aside class="drawer full" id="catDrawer"></aside>
+  <div class="toast" id="toast"></div>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
