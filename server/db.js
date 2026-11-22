@@ -136,6 +136,11 @@ addColumn('orders', 'source', 'TEXT');
 addColumn('orders', 'utm', 'TEXT');
 addColumn('orders', 'coupon_code', 'TEXT');
 addColumn('orders', 'discount', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('products', 'cost_price', 'INTEGER');
+addColumn('products', 'specs', "TEXT NOT NULL DEFAULT '[]'");
+addColumn('products', 'bundle_ids', "TEXT NOT NULL DEFAULT '[]'");
+addColumn('order_items', 'cost', 'INTEGER');
+addColumn('orders', 'cashback', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS product_variants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +190,66 @@ CREATE TABLE IF NOT EXISTS admin_log (
 
 addColumn('product_variants', 'price_usd', 'REAL');
 addColumn('product_variants', 'old_price_usd', 'REAL');
+addColumn('product_variants', 'cost_price', 'INTEGER');
+db.exec(`
+CREATE TABLE IF NOT EXISTS carts (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  items TEXT NOT NULL,
+  value INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reminded_at TEXT
+);
+CREATE TABLE IF NOT EXISTS expenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  note TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER,
+  variant_id INTEGER,
+  product_name TEXT,
+  variant_label TEXT,
+  delta INTEGER NOT NULL,
+  stock_after INTEGER,
+  reason TEXT NOT NULL,
+  ref TEXT,
+  user_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stock_mov_product ON stock_movements(product_id);
+CREATE TABLE IF NOT EXISTS page_views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day TEXT NOT NULL,
+  visitor TEXT NOT NULL,
+  path TEXT,
+  product_id INTEGER,
+  src TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_page_views_day ON page_views(day);
+CREATE TABLE IF NOT EXISTS faqs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  q_ku TEXT NOT NULL, q_ar TEXT, q_en TEXT,
+  a_ku TEXT NOT NULL, a_ar TEXT, a_en TEXT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name_ku TEXT NOT NULL, name_ar TEXT, name_en TEXT,
+  color TEXT NOT NULL DEFAULT '#8B5CF6'
+);
+CREATE TABLE IF NOT EXISTS product_tags (
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (product_id, tag_id)
+);
+`);
 
 // ---------- helpers ----------
 function hashPassword(password) {
@@ -333,8 +398,17 @@ function bannerSvg(c1, c2, kind) {
 }
 
 seed();
-for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '' })) {
+for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
+  slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',
+  variant_presets: JSON.stringify([{ name: 'Storage', values: ['64GB', '128GB', '256GB', '512GB', '1TB'] }, { name: 'Color', values: ['Black', 'White', 'Blue', 'Gold', 'Silver'] }]) })) {
   if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(k) == null) setSetting(k, v);
+}
+if (db.prepare('SELECT COUNT(*) n FROM faqs').get().n === 0 && db.prepare("SELECT value FROM settings WHERE key = 'faq_seeded'").get() == null) {
+  const ins = db.prepare('INSERT INTO faqs(q_ku, q_ar, q_en, a_ku, a_ar, a_en, sort) VALUES(?,?,?,?,?,?,?)');
+  ins.run('بەرهەمەکان ئۆریجیناڵن؟', 'هل المنتجات أصلية؟', 'Are the products original?', 'بەڵێ، هەموو بەرهەمەکان ئۆریجیناڵن و گەرەنتییان هەیە.', 'نعم، كل المنتجات أصلية ومع ضمان.', 'Yes, all products are 100% original with warranty.', 0);
+  ins.run('پارەدان چۆنە؟', 'كيف أدفع؟', 'How do I pay?', 'پارە لە کاتی گەیشتنی کاڵاکە دەدەیت.', 'تدفع عند استلام الطلب.', 'You pay cash when the order arrives.', 1);
+  ins.run('گەیاندن چەند دەخایەنێت؟', 'كم يستغرق التوصيل؟', 'How long does delivery take?', 'بەپێی شار؛ لە پەڕەی تەواوکردنی داواکاری دەیبینیت.', 'حسب المدينة، يظهر لك عند إتمام الطلب.', 'It depends on the city — you will see it at checkout.', 2);
+  setSetting('faq_seeded', '1');
 }
 // Delivery zones: [{ name, fee }]. Built once from the old comma-separated "cities" list.
 if (db.prepare("SELECT 1 FROM settings WHERE key = 'delivery_zones'").get() == null) {

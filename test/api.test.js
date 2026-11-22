@@ -215,6 +215,95 @@ let stop = () => {};
   r = await call('/admin/stats', { token: A2 });
   check('dashboard shows order sources', r.data.sources.some((x) => x.source === 'tiktok' && x.orders === 1) && r.data.utm.some((x) => x.utm === 'tiktok_bio'), r.data.sources);
 
+  // ---------- store management ----------
+  // cost price stays private; profit report uses it
+  const p6 = (await call('/admin/products', { token: A2 })).data.find((x) => x.id === 6);
+  r = await call('/admin/products/6', { method: 'PUT', token: A2, body: { ...p6, cost_price: 18000, specs: [{ k: 'Power', v: '20W' }, { k: 'Port', v: 'USB-C' }], bundle_ids: [8, 14], tag_ids: [] } });
+  check('admin sees cost + specs', r.data.cost_price === 18000 && r.data.specs.length === 2, r.data);
+  r = await call('/products/6');
+  check('public product hides cost, shows specs + bundle', r.data.product.cost_price === undefined && r.data.product.specs[0].k === 'Power' && r.data.bundle.map((x) => x.id).includes(8) && r.data.bundle.every((x) => x.cost_price === undefined), r.data);
+  r = await call('/admin/settings', { method: 'PUT', token: A2, body: { min_profit: '10000' } });
+  r = await call('/admin/products', { token: A2 });
+  check('low margin warning (25,000 − 18,000 < 10,000)', r.data.find((x) => x.id === 6).low_margin === true);
+
+  // tags
+  r = await call('/admin/tags', { method: 'POST', token: A2, body: { name_ku: 'نوێ', name_ar: 'جديد', name_en: 'New', color: '#22aa55' } });
+  const TAG = r.data.id;
+  await call('/admin/products/6', { method: 'PUT', token: A2, body: { ...p6, cost_price: 18000, tag_ids: [TAG] } });
+  check('product shows its tag', (await call('/products/6')).data.product.tags[0].name_en === 'New');
+
+  // abandoned cart: saved, listed, cleared by an order
+  await call('/cart/sync', { method: 'POST', token: Q, body: { items: [{ id: 6, qty: 1 }] } });
+  r = await call('/admin/carts', { token: A2 });
+  check('abandoned cart listed with value', r.data.some((c) => c.phone === '07709998877' && c.value === 25000), r.data);
+  // stock movement + cogs: Q orders product 6 (cost 18,000)
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 6, qty: 1 }], city: 'Erbil', address: 'x' } });
+  const MO = r.data;
+  check('customer order items never include cost', MO.items.every((i) => i.cost === undefined), MO.items);
+  r = await call('/admin/carts', { token: A2 });
+  check('order clears the saved cart', !r.data.some((c) => c.phone === '07709998877'));
+  r = await call('/admin/stock?product_id=6', { token: A2 });
+  check('stock movement recorded for the order', r.data.some((m) => m.reason === 'order' && m.delta === -1 && m.ref === `#${MO.id}`), r.data.slice(0, 3));
+  r = await call('/admin/stock/adjust', { method: 'POST', token: A2, body: { product_id: 6, delta: 10, reason: 'restock', note: 'supplier' } });
+  check('quick restock adds stock + log', r.data.ok && (await call('/admin/stock?product_id=6', { token: A2 })).data[0].reason === 'restock', r.data);
+
+  // cashback on delivery
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { cashback_percent: '2' } });
+  const walletBefore = (await call('/me', { token: Q })).data.user.wallet;
+  await call(`/admin/orders/${MO.id}`, { method: 'PUT', token: A2, body: { status: 'delivered' } });
+  const walletAfter = (await call('/me', { token: Q })).data.user.wallet;
+  check('2% cashback credited on delivery', walletAfter - walletBefore === 500, { walletBefore, walletAfter });
+  await call(`/admin/orders/${MO.id}`, { method: 'PUT', token: A2, body: { status: 'delivered' } });
+  check('cashback only once', (await call('/me', { token: Q })).data.user.wallet === walletAfter);
+
+  // expenses + profit
+  await call('/admin/expenses', { method: 'POST', token: A2, body: { category: 'ads', amount: 4000, note: 'TikTok' } });
+  r = await call('/admin/profit?months=1', { token: A2 });
+  const pm = r.data[0];
+  check('profit report: cogs, expenses, net', pm.cogs >= 18000 && pm.expenses === 4000 && pm.net === pm.sales - pm.cogs - pm.wallet - pm.expenses, pm);
+
+  // bulk price change (preview then apply) on the power-bank category
+  const pbCat = (await call('/products/15')).data.product.category_id;
+  r = await call('/admin/bulk-price', { method: 'POST', token: A2, body: { category_id: pbCat, mode: 'percent', value: 10, round: 250, preview: true } });
+  check('bulk price preview', r.data.count === 1 && r.data.changes[0].from === 55000 && r.data.changes[0].to === 60500, r.data);
+  check('preview changes nothing', (await call('/products/15')).data.product.price === 55000);
+  await call('/admin/bulk-price', { method: 'POST', token: A2, body: { category_id: pbCat, mode: 'percent', value: 10, round: 250 } });
+  check('bulk price applied', (await call('/products/15')).data.product.price === 60500);
+
+  // analytics
+  const track = (ua, body) => fetch(B + '/track', { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': ua }, body: JSON.stringify(body) });
+  await track('Mozilla/5.0 (iPhone)', { path: '/product/6', product_id: 6, src: 'tiktok_bio' });
+  await track('Mozilla/5.0 (iPhone)', { path: '/' });
+  await track('facebookexternalhit/1.1', { path: '/' });
+  r = await call('/admin/analytics?days=7', { token: A2 });
+  check('analytics counts real visits, ignores bots', r.data.totals.views === 2 && r.data.totals.visitors === 1 && r.data.top_products[0].id === 6 && r.data.sources.some((x) => x.src === 'tiktok_bio'), r.data.totals);
+
+  // FAQ
+  r = await call('/faqs');
+  check('FAQ seeded', r.data.length === 3 && r.data[0].q_ar, r.data.length);
+
+  // staff roles
+  await call('/admin/staff', { method: 'POST', token: A2, body: { phone: '07701234567', role: 'orders' } });
+  // that account was locked by the brute-force test earlier, so give it a fresh password via reset
+  r = await call('/auth/otp', { method: 'POST', body: { phone: '07508080808', purpose: 'register' } });
+  r = await call('/auth/register', { method: 'POST', body: { name: 'Staff', phone: '07508080808', password: 'staff123', code: r.data.dev_code } });
+  await call('/admin/staff', { method: 'POST', token: A2, body: { phone: '07508080808', role: 'orders' } });
+  const ST = (await call('/auth/login', { method: 'POST', body: { phone: '07508080808', password: 'staff123' } })).data.token;
+  check('orders-staff can open orders', (await call('/admin/orders', { token: ST })).status === 200);
+  check('orders-staff cannot open products', (await call('/admin/products', { token: ST })).status === 403);
+  check('orders-staff cannot change settings', (await call('/admin/settings', { method: 'PUT', token: ST, body: { store_name: 'x' } })).status === 403);
+  check('orders-staff cannot manage staff', (await call('/admin/staff', { token: ST })).status === 403);
+  check('orders-staff cannot edit wallets', (await call(`/admin/users/${uid}`, { method: 'PUT', token: ST, body: { wallet: 999999 } })).status === 403);
+  r = await call('/me', { token: ST });
+  check('staff /me includes admin path + sections', r.data.admin_path === '/admin' && r.data.sections.includes('orders'), r.data);
+  check('staff cannot use code-only login', (await call('/auth/otp', { method: 'POST', body: { phone: '07508080808', purpose: 'quick' } })).data.error === 'use_password');
+
+  // maintenance mode
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { maintenance_mode: '1' } });
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 14, qty: 1 }], city: 'Erbil', address: 'x' } });
+  check('maintenance blocks customer orders', r.status === 503 && r.data.error === 'maintenance', r);
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { maintenance_mode: '0' } });
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);

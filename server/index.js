@@ -10,6 +10,9 @@ const { startBackups, snapshot, listBackups, DIR: BACKUP_DIR } = require('./back
 const { newSecret, verifyTotp, otpauthUrl } = require('./totp');
 const { processUpload, ogImageFor } = require('./images');
 const { normalize, searchClause } = require('./search');
+const extrasModule = require('./extras');
+const { isStaff } = extrasModule;
+let extras = { recordStock: () => {}, pruneAnalytics: () => {} }; // filled in once the admin router exists
 
 const app = express();
 app.disable('x-powered-by');
@@ -25,9 +28,12 @@ app.use((req, res, next) => {
 const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancelled'];
 const ORDER_SOURCES = ['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
-  'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text'];
-const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_rate', 'usd_round'];
-const SESSION_DAYS = { customer: 30, admin: 7 };
+  'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text',
+  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate'];
+const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_round', 'min_profit'];
+// Secret admin address, e.g. ADMIN_PATH=/the-gate (default /admin).
+const ADMIN_PATH = '/' + String(process.env.ADMIN_PATH || '/admin').replace(/^\/+|\/+$/g, '').replace(/[^\w-]/g, '');
+const SESSION_DAYS = { customer: 30 }; // staff accounts: 7 days
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
 class HttpError extends Error { constructor(status, code) { super(code); this.status = status; this.code = code; } }
@@ -40,12 +46,16 @@ function publicUser(u) {
   if (!u) return null;
   return { id: u.id, name: u.name, phone: u.phone, role: u.role, wallet: u.wallet, referral_code: u.referral_code, avatar: u.avatar, created_at: u.created_at, totp_enabled: !!u.totp_enabled };
 }
-function productOut(p) {
+const parseJson = (v, d) => { try { const x = JSON.parse(v); return x ?? d; } catch { return d; } };
+function productOut(p, isAdmin = false) {
   if (!p) return p;
-  let images = [];
-  try { images = JSON.parse(p.images || '[]'); } catch { images = []; }
-  return { ...p, images, featured: !!p.featured, trending: !!p.trending, flash_sale: !!p.flash_sale, active: !!p.active, has_variants: p.variant_count > 0 };
+  const out = { ...p, images: parseJson(p.images || '[]', []), specs: parseJson(p.specs || '[]', []), bundle_ids: parseJson(p.bundle_ids || '[]', []),
+    featured: !!p.featured, trending: !!p.trending, flash_sale: !!p.flash_sale, active: !!p.active, has_variants: p.variant_count > 0 };
+  if (!isAdmin) { delete out.cost_price; delete out.search_text; delete out.bundle_ids; }
+  return out;
 }
+const publicVariant = ({ cost_price, ...v }) => v; // never send purchase cost to customers
+const tagsOf = (productId) => db.prepare('SELECT t.id, t.name_ku, t.name_ar, t.name_en, t.color FROM tags t JOIN product_tags pt ON pt.tag_id = t.id WHERE pt.product_id = ? ORDER BY t.id').all(productId);
 const variantsOf = (productId) => db.prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY sort, id').all(productId);
 function attachVariants(list) {
   const ids = list.filter((p) => p.has_variants).map((p) => p.id);
@@ -113,13 +123,13 @@ function auth(req, _res, next) {
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (token) {
     const row = db.prepare("SELECT u.*, julianday('now') - julianday(s.created_at) AS session_age FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?").get(token);
-    if (row && row.session_age <= (SESSION_DAYS[row.role] || 30)) { req.user = row; req.token = token; }
+    if (row && row.session_age <= (SESSION_DAYS[row.role] || 7)) { req.user = row; req.token = token; }
     else if (row) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   }
   next();
 }
 const requireUser = (req, _res, next) => (req.user ? next() : next(new HttpError(401, 'unauthorized')));
-const requireAdmin = (req, _res, next) => (req.user && req.user.role === 'admin' ? next() : next(new HttpError(403, 'forbidden')));
+const requireAdmin = (req, _res, next) => (req.user && isStaff(req.user.role) ? next() : next(new HttpError(403, 'forbidden'))); // any staff role; sections are checked in extras.js
 app.use('/api', auth);
 
 // Rate limiting stored in the database, so it survives restarts. Keys look like "ip:1.2.3.4" or "phone:0750...".
@@ -149,7 +159,7 @@ app.post('/api/auth/otp', wrap(async (req, res) => {
   const exists = !!db.prepare('SELECT 1 FROM users WHERE phone = ?').get(phone);
   if (purpose === 'register' && exists) throw new HttpError(409, 'phone_taken');
   if (purpose === 'reset' && !exists) throw new HttpError(404, 'phone_not_found');
-  if (purpose === 'quick' && exists && db.prepare('SELECT role FROM users WHERE phone = ?').get(phone).role === 'admin') throw new HttpError(403, 'use_password');
+  if (purpose === 'quick' && exists && db.prepare('SELECT role FROM users WHERE phone = ?').get(phone).role !== 'customer') throw new HttpError(403, 'use_password');
   if (purpose === 'change_phone') {
     if (!req.user) throw new HttpError(401, 'unauthorized');
     if (exists) throw new HttpError(409, 'phone_taken');
@@ -166,7 +176,7 @@ app.post('/api/auth/quick', wrap((req, res) => {
   const phone = normPhone(req.body.phone);
   if (phone.length < 7) throw new HttpError(400, 'invalid_input');
   const existing = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
-  if (existing && existing.role === 'admin') throw new HttpError(403, 'use_password'); // admins must use password (+2FA)
+  if (existing && existing.role !== 'customer') throw new HttpError(403, 'use_password'); // staff must use password (+2FA)
   const name = str(req.body.name, 80);
   if (!existing && !name) throw new HttpError(400, 'name_required');
   let referredBy = null;
@@ -305,7 +315,7 @@ function productQuery(q, { admin = false } = {}) {
   const limit = Math.min(int(q.limit, 40), 200);
   const offset = Math.max(int(q.offset, 0), 0);
   const sql = `SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
-  return db.prepare(sql).all(...params, limit, offset).map(productOut);
+  return db.prepare(sql).all(...params, limit, offset).map((p) => productOut(p, admin));
 }
 
 app.get('/api/products', wrap((req, res) => res.json(productQuery(req.query))));
@@ -316,9 +326,28 @@ app.get('/api/products/:id', wrap((req, res) => {
   const related = db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.category_id = ? AND p.id != ? ORDER BY p.sold DESC LIMIT 8`)
     .all(p.category_id, p.id).map(productOut);
   const product = productOut(p);
-  product.variants = variantsOf(p.id);
-  res.json({ product, related });
+  product.variants = variantsOf(p.id).map(publicVariant);
+  product.tags = tagsOf(p.id);
+  res.json({ product, related, bundle: boughtTogether(p) });
 }));
+
+// "Frequently bought together": products the admin picked, else what other customers bought with it, else popular accessories.
+function boughtTogether(p) {
+  const pick = (ids) => ids.length ? db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.stock > 0 AND p.id IN (${ids.map(() => '?').join(',')})`).all(...ids) : [];
+  let list = pick(parseJson(p.bundle_ids || '[]', []).map((x) => int(x)).filter(Boolean).slice(0, 4));
+  if (list.length < 3) {
+    const co = db.prepare(`SELECT oi2.product_id id, COUNT(*) n FROM order_items oi1 JOIN order_items oi2 ON oi2.order_id = oi1.order_id AND oi2.product_id != oi1.product_id
+      WHERE oi1.product_id = ? GROUP BY oi2.product_id ORDER BY n DESC LIMIT 6`).all(p.id).map((r) => r.id);
+    list = [...list, ...pick(co).filter((x) => !list.some((y) => y.id === x.id))];
+  }
+  if (list.length < 3) {
+    const more = db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.stock > 0 AND p.id != ? AND p.price < ?
+      AND (p.category_id IS NULL OR p.category_id NOT IN (SELECT id FROM categories WHERE id = ? OR parent_id = (SELECT parent_id FROM categories WHERE id = ?)))
+      ORDER BY p.sold DESC LIMIT 6`).all(p.id, Math.max(p.price * 0.5, 50000), p.category_id || 0, p.category_id || 0);
+    list = [...list, ...more.filter((x) => !list.some((y) => y.id === x.id))];
+  }
+  return list.filter((x) => x.id !== p.id).slice(0, 4).map((x) => productOut(x));
+}
 
 // ---------------- customer account ----------------
 function userStats(userId) {
@@ -331,7 +360,9 @@ function userStats(userId) {
 }
 
 app.get('/api/me', requireUser, wrap((req, res) => {
-  res.json({ user: publicUser(req.user), stats: userStats(req.user.id) });
+  const out = { user: publicUser(req.user), stats: userStats(req.user.id) };
+  if (isStaff(req.user.role)) { out.admin_path = ADMIN_PATH; out.sections = extrasModule.ROLE_SECTIONS[req.user.role]; }
+  res.json(out);
 }));
 
 app.put('/api/me', requireUser, wrap((req, res) => {
@@ -394,7 +425,8 @@ app.delete('/api/me/addresses/:id', requireUser, wrap((req, res) => {
 // ---------------- orders ----------------
 function orderWithItems(o) {
   if (!o) return o;
-  return { ...o, items: db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id) };
+  // purchase cost stays on the server (used for profit reports only)
+  return { ...o, items: db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id).map(({ cost, ...it }) => it) };
 }
 
 // ---- coupons (influencer / campaign codes) ----
@@ -449,6 +481,7 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
   const address = str(req.body.address, 300);
   if (!items.length) throw new HttpError(400, 'cart_empty');
   if (!city || !address) throw new HttpError(400, 'invalid_input');
+  if (s.maintenance_mode === '1' && !isStaff(req.user.role)) throw new HttpError(503, 'maintenance');
   // Fake-order protection
   if (req.user.blocked) throw new HttpError(403, 'account_blocked');
   const maxPending = int(s.max_pending_orders, 2);
@@ -494,10 +527,13 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
     const utm = str(req.body.utm, 100).replace(/[^\w\-.:/ ]/g, '') || null;
     const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total, discount, coupon_code, source, utm)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, name, phone, city, address, str(req.body.note, 500), subtotal, delivery, walletUsed, total, discount, couponCode, source, utm).lastInsertRowid);
-    const insItem = db.prepare('INSERT INTO order_items(order_id, product_id, variant_id, variant_label, name, image, price, qty) VALUES(?,?,?,?,?,?,?,?)');
+    const insItem = db.prepare('INSERT INTO order_items(order_id, product_id, variant_id, variant_label, name, image, price, qty, cost) VALUES(?,?,?,?,?,?,?,?,?)');
     for (const { p, qty, price, variant } of lines) {
-      insItem.run(oid, p.id, variant ? variant.id : null, variant ? variant.label : null, p.name_ku, p.image, price, qty);
+      const cost = variant && variant.cost_price != null ? variant.cost_price : p.cost_price; // snapshot for profit reports
+      insItem.run(oid, p.id, variant ? variant.id : null, variant ? variant.label : null, p.name_ku, p.image, price, qty, cost ?? null);
+      extras.recordStock({ productId: p.id, variantId: variant ? variant.id : null, delta: -qty, reason: 'order', ref: `#${oid}`, userName: name });
     }
+    db.prepare('DELETE FROM carts WHERE user_id = ?').run(req.user.id);
     if (walletUsed) db.prepare('UPDATE users SET wallet = wallet - ? WHERE id = ?').run(walletUsed, req.user.id);
     return db.prepare('SELECT * FROM orders WHERE id = ?').get(oid);
   });
@@ -521,11 +557,13 @@ app.get('/api/orders/:id', requireUser, wrap((req, res) => {
   res.json(orderWithItems(o));
 }));
 
-function cancelOrder(o) {
+function cancelOrder(o, userName = null) {
   for (const it of db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id)) {
     if (it.product_id) db.prepare('UPDATE products SET stock = stock + ?, sold = MAX(sold - ?, 0) WHERE id = ?').run(it.qty, it.qty, it.product_id);
     if (it.variant_id) db.prepare('UPDATE product_variants SET stock = stock + ? WHERE id = ?').run(it.qty, it.variant_id);
+    if (it.product_id) extras.recordStock({ productId: it.product_id, variantId: it.variant_id, delta: it.qty, reason: 'cancel', ref: `#${o.id}`, userName });
   }
+  if (o.cashback && o.user_id) db.prepare('UPDATE users SET wallet = MAX(wallet - ?, 0) WHERE id = ?').run(o.cashback, o.user_id);
   if (o.wallet_used && o.user_id) db.prepare('UPDATE users SET wallet = wallet + ? WHERE id = ?').run(o.wallet_used, o.user_id);
   if (o.coupon_code) db.prepare('UPDATE coupons SET uses = MAX(uses - 1, 0) WHERE code = ?').run(o.coupon_code);
 }
@@ -535,7 +573,7 @@ app.post('/api/orders/:id/cancel', requireUser, wrap((req, res) => {
   if (!o) throw new HttpError(404, 'not_found');
   if (o.status !== 'pending') throw new HttpError(400, 'cannot_cancel');
   tx(() => {
-    cancelOrder(o);
+    cancelOrder(o, req.user.name);
     db.prepare("UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(o.id);
   });
   notify(`❌ الزبون ألغى الطلب #${o.id} — ${escHtml(o.customer_name)} (${escHtml(o.phone)})`);
@@ -545,6 +583,7 @@ app.post('/api/orders/:id/cancel', requireUser, wrap((req, res) => {
 // ---------------- admin ----------------
 const admin = express.Router();
 admin.use(requireAdmin);
+extras = extrasModule.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, requireUser, getSettings, setSetting, priceItems, repriceUsd, syncProductFromVariants });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -624,8 +663,17 @@ admin.put('/orders/:id', wrap((req, res) => {
   if (!ORDER_STATUSES.includes(status)) throw new HttpError(400, 'invalid_status');
   if (o.status === 'cancelled' && status !== 'cancelled') throw new HttpError(400, 'order_cancelled');
   tx(() => {
-    if (status === 'cancelled' && o.status !== 'cancelled') cancelOrder(o);
+    if (status === 'cancelled' && o.status !== 'cancelled') cancelOrder(o, req.user.name);
     db.prepare("UPDATE orders SET status = ?, admin_note = COALESCE(?, admin_note), updated_at = datetime('now') WHERE id = ?").run(status, req.body.admin_note != null ? str(req.body.admin_note, 500) : null, o.id);
+    // Cashback ("points"): a % of the products total goes to the customer's wallet once, when delivered.
+    const cashbackPct = Number(getSettings().cashback_percent) || 0;
+    if (status === 'delivered' && o.user_id && !o.cashback && cashbackPct > 0) {
+      const cb = Math.floor(((o.subtotal - o.discount) * Math.min(cashbackPct, 50)) / 100);
+      if (cb > 0) {
+        db.prepare('UPDATE users SET wallet = wallet + ? WHERE id = ?').run(cb, o.user_id);
+        db.prepare('UPDATE orders SET cashback = ? WHERE id = ?').run(cb, o.id);
+      }
+    }
     // Referral reward: first delivered order of a referred customer credits the referrer.
     if (status === 'delivered' && o.user_id) {
       const u = db.prepare('SELECT * FROM users WHERE id = ?').get(o.user_id);
@@ -641,8 +689,8 @@ admin.put('/orders/:id', wrap((req, res) => {
 }));
 
 // products
-admin.get('/products', wrap((req, res) => res.json(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true })))));
-const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd'];
+admin.get('/products', wrap((req, res) => res.json(adminDecorate(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true }))))));
+const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids'];
 function productValues(b) {
   const v = {
     category_id: b.category_id ? int(b.category_id) : null,
@@ -654,7 +702,11 @@ function productValues(b) {
     images: JSON.stringify(Array.isArray(b.images) ? b.images.map((x) => str(x, 500)).filter(Boolean).slice(0, 10) : []),
     featured: b.featured ? 1 : 0, trending: b.trending ? 1 : 0, flash_sale: b.flash_sale ? 1 : 0,
     active: b.active === false || b.active === 0 ? 0 : 1,
+    cost_price: b.cost_price !== '' && b.cost_price != null ? Math.max(0, int(b.cost_price)) : null,
+    specs: JSON.stringify((Array.isArray(b.specs) ? b.specs : []).slice(0, 30).map((x) => ({ k: str(x && x.k, 60), v: str(x && x.v, 200) })).filter((x) => x.k && x.v)),
+    bundle_ids: JSON.stringify((Array.isArray(b.bundle_ids) ? b.bundle_ids : []).map((x) => int(x)).filter((x) => x > 0).slice(0, 4)),
   };
+  v.tag_ids = (Array.isArray(b.tag_ids) ? b.tag_ids : []).map((x) => int(x)).filter((x) => x > 0).slice(0, 10);
   // USD-priced products: the admin types prices in dollars; IQD prices are calculated from the rate.
   const st = getSettings();
   const num = (x) => Math.max(0, Math.round((Number(x) || 0) * 100) / 100);
@@ -672,6 +724,7 @@ function productValues(b) {
       price: v.usd_priced ? toIqd(pu, st) || 0 : Math.max(0, int(x.price)),
       old_price: v.usd_priced ? toIqd(opu, st) : (x.old_price ? Math.max(0, int(x.old_price)) : null),
       price_usd: pu, old_price_usd: opu, stock: Math.max(0, int(x.stock)), sort: i,
+      cost_price: x.cost_price !== '' && x.cost_price != null ? Math.max(0, int(x.cost_price)) : null,
     };
   }).filter((x) => x.label && x.price);
   // Guard against a dinar amount typed into a dollar field (e.g. 1,500,000 "$").
@@ -685,19 +738,36 @@ function saveVariants(productId, variants) {
   db.prepare(`DELETE FROM product_variants WHERE product_id = ? ${keep.length ? `AND id NOT IN (${keep.map(() => '?').join(',')})` : ''}`).run(productId, ...keep);
   for (const x of variants) {
     const exists = x.id && db.prepare('SELECT 1 FROM product_variants WHERE id = ? AND product_id = ?').get(x.id, productId);
-    if (exists) db.prepare('UPDATE product_variants SET label=?, price=?, old_price=?, price_usd=?, old_price_usd=?, stock=?, sort=? WHERE id=?').run(x.label, x.price, x.old_price, x.price_usd, x.old_price_usd, x.stock, x.sort, x.id);
-    else db.prepare('INSERT INTO product_variants(product_id, label, price, old_price, price_usd, old_price_usd, stock, sort) VALUES(?,?,?,?,?,?,?,?)').run(productId, x.label, x.price, x.old_price, x.price_usd, x.old_price_usd, x.stock, x.sort);
+    if (exists) db.prepare('UPDATE product_variants SET label=?, price=?, old_price=?, price_usd=?, old_price_usd=?, stock=?, sort=?, cost_price=? WHERE id=?').run(x.label, x.price, x.old_price, x.price_usd, x.old_price_usd, x.stock, x.sort, x.cost_price, x.id);
+    else db.prepare('INSERT INTO product_variants(product_id, label, price, old_price, price_usd, old_price_usd, stock, sort, cost_price) VALUES(?,?,?,?,?,?,?,?,?)').run(productId, x.label, x.price, x.old_price, x.price_usd, x.old_price_usd, x.stock, x.sort, x.cost_price);
   }
   syncProductFromVariants(productId);
 }
-const adminProduct = (id) => attachVariants([productOut(db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.id = ?`).get(id))])[0];
+function saveTags(productId, tagIds) {
+  db.prepare('DELETE FROM product_tags WHERE product_id = ?').run(productId);
+  for (const t of tagIds) if (db.prepare('SELECT 1 FROM tags WHERE id = ?').get(t)) db.prepare('INSERT OR IGNORE INTO product_tags(product_id, tag_id) VALUES(?,?)').run(productId, t);
+}
+// Admin list extras: tag ids and a warning when the margin is below the "minimum profit" setting.
+function adminDecorate(list) {
+  const minProfit = int(getSettings().min_profit, 0);
+  for (const p of list) {
+    p.tag_ids = db.prepare('SELECT tag_id FROM product_tags WHERE product_id = ?').all(p.id).map((r) => r.tag_id);
+    const pairs = p.variants && p.variants.length ? p.variants.map((v) => [v.price, v.cost_price ?? p.cost_price]) : [[p.price, p.cost_price]];
+    p.low_margin = pairs.some(([price, cost]) => cost != null && price - cost < minProfit);
+  }
+  return list;
+}
+const adminProduct = (id) => adminDecorate(attachVariants([productOut(db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.id = ?`).get(id), true)]))[0];
 admin.post('/products', wrap((req, res) => {
   const v = productValues(req.body);
   const id = tx(() => {
     const pid = Number(db.prepare(`INSERT INTO products(${PRODUCT_FIELDS.join(',')}) VALUES(${PRODUCT_FIELDS.map(() => '?').join(',')})`)
       .run(...PRODUCT_FIELDS.map((f) => v[f])).lastInsertRowid);
     saveVariants(pid, v.variants);
+    saveTags(pid, v.tag_ids);
     indexProduct(pid);
+    const created = db.prepare('SELECT stock FROM products WHERE id = ?').get(pid).stock;
+    if (created) extras.recordStock({ productId: pid, delta: created, reason: 'initial', userName: req.user.name });
     return pid;
   });
   logAdmin(req, 'product_create', { id, name: v.name_ku, price: v.price });
@@ -708,10 +778,19 @@ admin.put('/products/:id', wrap((req, res) => {
   const id = int(req.params.id);
   const before = db.prepare('SELECT price, stock FROM products WHERE id = ?').get(id);
   if (!before) throw new HttpError(404, 'not_found');
+  const beforeVariants = Object.fromEntries(variantsOf(id).map((x) => [x.id, x.stock]));
   tx(() => {
     db.prepare(`UPDATE products SET ${PRODUCT_FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...PRODUCT_FIELDS.map((f) => v[f]), id);
     saveVariants(id, v.variants);
+    saveTags(id, v.tag_ids);
     indexProduct(id);
+    // Stock log: record what the edit changed
+    const afterVariants = variantsOf(id);
+    if (afterVariants.length) {
+      for (const x of afterVariants) extras.recordStock({ productId: id, variantId: x.id, delta: x.stock - (beforeVariants[x.id] ?? 0), reason: 'admin_edit', userName: req.user.name });
+    } else {
+      extras.recordStock({ productId: id, delta: v.stock - before.stock, reason: 'admin_edit', userName: req.user.name });
+    }
   });
   logAdmin(req, 'product_update', { id, name: v.name_ku, price: [before.price, v.price], stock: [before.stock, v.stock] });
   res.json(adminProduct(id));
@@ -787,8 +866,8 @@ admin.put('/users/:id', wrap((req, res) => {
   const id = int(req.params.id);
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!u) throw new HttpError(404, 'not_found');
-  const role = ['customer', 'admin'].includes(req.body.role) ? req.body.role : u.role;
-  if (id === req.user.id && role !== 'admin') throw new HttpError(400, 'cannot_demote_self');
+  const role = u.role; // roles are changed on the staff page (owner only)
+  if (req.body.wallet != null && !['admin', 'manager'].includes(req.user.role)) throw new HttpError(403, 'forbidden');
   const wallet = req.body.wallet != null ? Math.max(0, int(req.body.wallet)) : u.wallet;
   const blocked = req.body.blocked != null ? (req.body.blocked ? 1 : 0) : u.blocked;
   if (id === req.user.id && blocked) throw new HttpError(400, 'cannot_demote_self');
@@ -852,7 +931,7 @@ admin.put('/settings', wrap((req, res) => {
     let zones;
     try { zones = typeof req.body.delivery_zones === 'string' ? JSON.parse(req.body.delivery_zones) : req.body.delivery_zones; } catch { zones = null; }
     if (!Array.isArray(zones)) throw new HttpError(400, 'invalid_input');
-    req.body.delivery_zones = JSON.stringify(zones.slice(0, 100).map((z) => ({ name: str(z.name, 60), fee: Math.max(0, int(z.fee)) })).filter((z) => z.name));
+    req.body.delivery_zones = JSON.stringify(zones.slice(0, 100).map((z) => ({ name: str(z.name, 60), fee: Math.max(0, int(z.fee)), eta: str(z.eta, 40) })).filter((z) => z.name));
     req.body.cities = JSON.parse(req.body.delivery_zones).map((z) => z.name).join(',');
   }
   for (const k of ADMIN_SETTINGS) if (k in req.body) {
@@ -903,7 +982,7 @@ function renderIndex(req, res, meta = {}) {
   const s = getSettings();
   const base = PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
   const title = meta.title || s.store_name || 'Store';
-  const desc = meta.description || 'مۆبایل و ئەکسسوار — گەیاندن بۆ هەموو شارەکان | موبايلات وإكسسوارات مع التوصيل';
+  const desc = meta.description || s.seo_description || s.slogan || 'مۆبایل و ئەکسسوار — گەیاندن بۆ هەموو شارەکان | موبايلات وإكسسوارات مع التوصيل';
   let image = meta.image;
   if (!image) {
     const b = db.prepare('SELECT image FROM banners WHERE active = 1 ORDER BY sort, id LIMIT 1').get();
@@ -942,7 +1021,10 @@ app.get('/p/:id', (req, res) => {
 });
 app.get('/', (req, res) => renderIndex(req, res));
 app.use(express.static(PUBLIC, { index: false }));
-app.get('/admin*', (_req, res) => res.sendFile(path.join(PUBLIC, 'admin', 'index.html')));
+const sendAdmin = (_req, res) => { res.setHeader('X-Robots-Tag', 'noindex'); res.sendFile(path.join(PUBLIC, 'admin', 'index.html')); };
+app.get(ADMIN_PATH, sendAdmin);
+app.get(`${ADMIN_PATH}/*`, (req, res, next) => (ADMIN_PATH === '/admin' && /\.(js|css)$/.test(req.path) ? next() : sendAdmin(req, res)));
+if (ADMIN_PATH !== '/admin') app.get('/admin', (req, res) => renderIndex(req, res)); // the default address shows the shop
 app.get('*', (req, res) => renderIndex(req, res));
 
 // ---------------- errors ----------------
@@ -962,6 +1044,8 @@ const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   rebuildSearchIndex();
   startBackups();
+  extras.pruneAnalytics();
+  setInterval(() => extras.pruneAnalytics(), 24 * 3600 * 1000).unref();
   setInterval(() => {
     db.prepare("DELETE FROM sessions WHERE julianday('now') - julianday(created_at) > 30").run();
     db.prepare('DELETE FROM auth_failures WHERE ts < ?').run(Date.now() - 24 * 3600 * 1000);
