@@ -45,6 +45,8 @@
     wand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3 21 12-12M15 4V2M15 10V8M19 6h2M9 6h2M18 3l1-1M18 9l1 1"/></svg>',
     share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
     help: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 14.5a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5ZM12 6a3.5 3.5 0 0 0-3.5 3.5h2a1.5 1.5 0 1 1 2.2 1.3c-.9.5-1.7 1.3-1.7 2.7v.5h2v-.4c0-.6.3-.9.9-1.3A3.5 3.5 0 0 0 12 6Z"/></svg>',
+    swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>',
+    spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 2 9.4 7.4 4 9l5.4 1.6L11 16l1.6-5.4L18 9l-5.4-1.6L11 2Zm7 11-.9 2.6-2.6.9 2.6.9.9 2.6.9-2.6 2.6-.9-2.6-.9L18 13Z"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
@@ -58,7 +60,8 @@
     lang: store.get('lang', 'ku'),
     token: store.get('token', null),
     user: store.get('user', null),
-    cart: store.get('cart', []), // [{id, qty, name_ku, name_ar, name_en, price, image, stock}]
+    cart: store.get('cart', []),
+    tradein: store.get('tradein', null), // { model_id, answers, estimate, label } // [{id, qty, name_ku, name_ar, name_en, price, image, stock}]
     settings: {},
     categories: [],
     sort: 'foryou',
@@ -196,6 +199,8 @@
           ${item('#/cart', I.basket, 'g', T('cart'), route === 'cart')}
           ${item('#/orders', I.bag, 'p', T('myOrders'), route === 'orders')}
           ${item('#', I.search, 'y', T('search'), false, 'data-open-search')}
+          ${item('#/finder', I.spark, 'p', T('finderTitle'), route === 'finder')}
+          ${S.settings.tradein_enabled === '1' ? item('#/tradein', I.swap, 'g', T('tiTitle'), route === 'tradein') : ''}
           ${item('#/faq', I.help, 'b', T('faq'), route === 'faq')}
           ${u && u.role && u.role !== 'customer' ? item(esc(S.adminPath || '/admin'), I.admin, 'r', T('adminPanel'), false) : ''}
         </div>
@@ -346,6 +351,10 @@
       <div class="container">
         <div id="slider"></div>
         ${trustStrip()}
+        <div class="promo-tiles">
+          <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b><small>${T('finderSub')}</small></a>
+          ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b><small>${T('tiCheck')}</small></a>` : ''}
+        </div>
         <div id="flash"></div>
         <div class="sort-tabs" id="sortTabs"></div>
         <div id="grid">${gridSkeleton()}</div>
@@ -481,6 +490,7 @@
               <div class="qty" id="qtyBox"><button id="qMinus">${I.minus}</button><span id="qVal" class="num">1</span><button id="qPlus">${I.plus}</button></div>
               <button class="btn btn-primary" id="addBtn">${I.basket}${T('addToCart')}</button>
             </div>
+            ${p.attrs && p.attrs.os && S.settings.tradein_enabled === '1' ? `<a class="ti-hint" href="#/tradein">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}
             <button class="btn btn-soft btn-block" id="shareBtn" style="margin-bottom:6px">${I.share}${T('share')}</button>
             ${trustStrip()}
             <div class="cashback-note hidden" id="pdCashback"></div>
@@ -586,13 +596,16 @@
           </div>`).join('')}</div>
         <div class="card summary">
           ${freeOver && sub < freeOver ? `<div class="hint">${esc(T('freeDeliveryHint', { x: `${fmt(freeOver - sub)} ${T('currency')}` }))}<div class="progress"><i style="width:${Math.min(100, (sub / freeOver) * 100)}%"></i></div></div>` : ''}
+          ${tradeinBox(sub)}
           <div class="sum-row"><span>${T('subtotal')}</span>${money(sub)}</div>
+          ${S.tradein ? `<div class="sum-row"><span>${T('tiCredit')}</span><b class="num" style="color:var(--green)">-${fmt(Math.min(S.tradein.estimate, sub))}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${isFree || !minFee ? `<b style="color:var(--green)">${T('free')}</b>` : `<span>${fees.length > 1 && new Set(fees).size > 1 ? `<small style="color:var(--ink-2)">${T('from')}</small> ` : ''}${money(minFee)}</span>`}</div>
-          <div class="sum-row total"><span>${T('total')}</span>${money(sub + (isFree ? 0 : minFee))}</div>
+          <div class="sum-row total"><span>${T('total')}</span>${money(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))}</div>
           <a class="btn btn-primary btn-block" href="#/checkout" style="margin-top:12px">${T('checkout')}</a>
         </div>
       </div>`;
     app.onclick = (e) => {
+      if (e.target.closest('[data-ti-remove]')) { S.tradein = null; store.del('tradein'); return viewCart(true); }
       const b = e.target.closest('[data-inc],[data-dec],[data-rm]'); if (!b) return;
       const key = b.dataset.inc || b.dataset.dec || b.dataset.rm;
       const it = S.cart.find((x) => cartKey(x) === key); if (!it) return;
@@ -601,6 +614,12 @@
       if (b.dataset.rm) S.cart = S.cart.filter((x) => cartKey(x) !== key);
       saveCart(); viewCart(true);
     };
+  }
+
+  function tradeinBox(sub) {
+    if (S.settings.tradein_enabled !== '1') return '';
+    if (!S.tradein) return `<a class="ti-banner" href="#/tradein?from=cart">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>`;
+    return `<div class="ti-applied">${I.swap}<div><b>${esc(S.tradein.label)}</b><small>${T('tiNote')}</small></div><button data-ti-remove aria-label="${esc(T('delete'))}">${I.close}</button></div>`;
   }
 
   async function viewCheckout() {
@@ -642,6 +661,7 @@
             <button type="button" class="btn btn-soft" id="couponBtn">${T('apply')}</button>
           </div>
           <div id="couponMsg"></div>
+          ${S.tradein ? `<div class="sum-row"><span>${T('tiCredit')}<br><small style="color:var(--muted)">${esc(S.tradein.label)}</small></span><span class="num" style="color:var(--green)" id="tiAmt"></span></div>` : ''}
           <div class="sum-row hidden" id="discountRow"><span>${T('discountLbl')} <span class="num" id="couponCode"></span></span><span class="num" style="color:var(--green)" id="discountAmt"></span></div>
           <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('delivery')}</span><span id="coDelivery"></span></div>
           <div class="sum-row hidden" id="walletRow"><span>${T('walletUsed')}</span><span class="num" style="color:var(--green)" id="walletAmt"></span></div>
@@ -659,10 +679,12 @@
       $('#discountRow').classList.toggle('hidden', !disc);
       $('#discountAmt').textContent = `-${fmt(disc)}`;
       $('#couponCode').textContent = coupon ? `(${coupon.code})` : '';
-      const used = useWallet ? Math.min(user.wallet, sub - disc + delivery) : 0;
+      const ti = S.tradein ? Math.min(S.tradein.estimate, sub - disc) : 0;
+      if ($('#tiAmt')) $('#tiAmt').textContent = `-${fmt(ti)}`;
+      const used = useWallet ? Math.min(user.wallet, sub - disc - ti + delivery) : 0;
       $('#walletRow').classList.toggle('hidden', !used);
       $('#walletAmt').textContent = `-${fmt(used)}`;
-      $('#coTotal').innerHTML = money(sub - disc + delivery - used);
+      $('#coTotal').innerHTML = money(sub - disc - ti + delivery - used);
     };
     recalc();
     $('#coForm').city.onchange = recalc;
@@ -698,9 +720,10 @@
           items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id || undefined, qty: i.qty })),
           name: fd.get('name'), phone: fd.get('phone'), city: fd.get('city'), address: fd.get('address'), note: fd.get('note'), use_wallet: useWallet,
           coupon: coupon ? coupon.code : undefined, source: source || undefined, utm: campaignSource() || undefined,
+          tradein: S.tradein ? { model_id: S.tradein.model_id, answers: S.tradein.answers } : undefined,
         } });
         if (!addresses.length) api('/me/addresses', { method: 'POST', body: { city: fd.get('city'), details: fd.get('address') } }).catch(() => {});
-        S.cart = []; saveCart();
+        S.cart = []; saveCart(); S.tradein = null; store.del('tradein');
         app.innerHTML = `<div class="empty"><div class="ic" style="background:var(--green-soft);color:var(--green)">${I.check}</div>
           <h3>${T('orderPlaced')}</h3><p>${T('orderPlacedSub')}</p>
           <p><b>${esc(T('orderNo', { x: order.id }))}</b></p>
@@ -708,6 +731,7 @@
       } catch (e) {
         btn.disabled = false;
         if (e.code && e.code.startsWith('coupon_')) { coupon = null; drawCoupon(); recalc(); }
+        if (e.code && e.code.startsWith('tradein_')) { S.tradein = null; store.del('tradein'); }
         $('#coErr').innerHTML = `<div class="err">${esc(e.code && e.code.startsWith('coupon_') ? couponErr(e) : errMsg(e))}</div>`;
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -968,6 +992,7 @@
           <div class="sum-row"><span>${T('address')}</span><b>${esc(o.address)}</b></div>
           ${o.note ? `<div class="sum-row"><span>${T('note')}</span><b>${esc(o.note)}</b></div>` : ''}
           <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('subtotal')}</span>${money(o.subtotal)}</div>
+          ${o.tradein ? `<div class="sum-row"><span>${T('tiCredit')}<br><small style="color:var(--muted)">${esc(o.tradein.label)} · ${T(`ti_${o.tradein.status}`)}</small></span><b class="num" style="color:var(--green)">-${fmt(o.tradein_credit)}</b></div>` : ''}
           ${o.discount ? `<div class="sum-row"><span>${T('discountLbl')} <span class="num">(${esc(o.coupon_code || '')})</span></span><b class="num" style="color:var(--green)">-${fmt(o.discount)}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${o.delivery_fee ? money(o.delivery_fee) : `<b style="color:var(--green)">${T('free')}</b>`}</div>
           ${o.wallet_used ? `<div class="sum-row"><span>${T('walletUsed')}</span><b class="num" style="color:var(--green)">-${fmt(o.wallet_used)}</b></div>` : ''}
@@ -1053,6 +1078,132 @@
     </div>`;
   }
 
+  // ================= trade-in wizard =================
+  const TI_Q = { screen: ['perfect', 'scratches', 'cracked'], body: ['perfect', 'scratches', 'damaged'], battery: ['good', 'ok', 'weak'], works: ['yes', 'no'], box: ['yes', 'no'] };
+  async function viewTradein(fromCart) {
+    app.innerHTML = '<div class="spinner"></div>';
+    const data = await api('/tradein/models').catch(() => ({ enabled: false, models: [] }));
+    if (!data.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_tradein_disabled')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
+    const models = data.models;
+    const st = { brand: null, model: null, model_id: null, answers: {} };
+    const qKeys = Object.keys(TI_Q);
+    const wa = String(S.settings.whatsapp || '').replace(/\D/g, '');
+    const shell = (title, body, stepNo, total) => `${pageHead(T('tiTitle'))}<div class="container wizard">
+      <div class="wz-progress"><i style="width:${Math.round((stepNo / total) * 100)}%"></i></div>
+      <div class="wz-step">${esc(T('step', { x: stepNo, y: total }))}</div><h2 class="wz-q">${title}</h2>${body}</div>`;
+    const total = 3 + qKeys.length;
+    const brands = [...new Set(models.map((m) => m.brand))];
+    const stepBrand = () => {
+      app.innerHTML = shell(T('tiBrand'), `<p class="wz-sub">${T('tiSub')}</p><div class="wz-options">${brands.map((b) => `<button class="wz-opt" data-v="${esc(b)}">${esc(b)}</button>`).join('')}</div>
+        ${wa ? `<a class="wz-link" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent(T('tiTitle'))}">${T('tiNotListed')}</a>` : ''}`, 1, total);
+      app.querySelectorAll('[data-v]').forEach((b) => b.onclick = () => { st.brand = b.dataset.v; stepModel(); });
+    };
+    const stepModel = () => {
+      const names = [...new Set(models.filter((m) => m.brand === st.brand).map((m) => m.model))];
+      app.innerHTML = shell(T('tiModel'), `<div class="wz-options list">${names.map((n) => `<button class="wz-opt" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <button class="btn btn-soft wz-back">${T('back')}</button>`, 2, total);
+      app.querySelectorAll('[data-v]').forEach((b) => b.onclick = () => { st.model = b.dataset.v; stepStorage(); });
+      app.querySelector('.wz-back').onclick = stepBrand;
+    };
+    const stepStorage = () => {
+      const opts = models.filter((m) => m.brand === st.brand && m.model === st.model);
+      if (opts.length === 1) { st.model_id = opts[0].id; return stepQ(0); }
+      app.innerHTML = shell(T('tiStorage'), `<div class="wz-options">${opts.map((m) => `<button class="wz-opt" data-v="${m.id}">${m.storage_gb >= 1024 ? `${m.storage_gb / 1024}TB` : `${m.storage_gb}GB`}</button>`).join('')}</div>
+        <button class="btn btn-soft wz-back">${T('back')}</button>`, 3, total);
+      app.querySelectorAll('[data-v]').forEach((b) => b.onclick = () => { st.model_id = Number(b.dataset.v); stepQ(0); });
+      app.querySelector('.wz-back').onclick = stepModel;
+    };
+    const stepQ = (i) => {
+      if (i >= qKeys.length) return result();
+      const q = qKeys[i];
+      app.innerHTML = shell(T(`q_${q}`), `<div class="wz-options list">${TI_Q[q].map((a) => `<button class="wz-opt ${st.answers[q] === a ? 'on' : ''}" data-v="${a}">${T(`a_${q}_${a}`)}</button>`).join('')}</div>
+        <button class="btn btn-soft wz-back">${T('back')}</button>`, 4 + i, total);
+      app.querySelectorAll('[data-v]').forEach((b) => b.onclick = () => { st.answers[q] = b.dataset.v; stepQ(i + 1); });
+      app.querySelector('.wz-back').onclick = () => (i ? stepQ(i - 1) : stepStorage());
+    };
+    const result = async () => {
+      app.innerHTML = '<div class="spinner"></div>';
+      let q;
+      try { q = await api('/tradein/quote', { method: 'POST', body: { model_id: st.model_id, answers: st.answers } }); }
+      catch (e) { app.innerHTML = `<div class="empty"><h3>${esc(errMsg(e))}</h3><button class="btn btn-primary" id="again">${T('retake')}</button></div>`; $('#again').onclick = stepBrand; return; }
+      const hasCart = cartCount() > 0;
+      app.innerHTML = `${pageHead(T('tiTitle'))}<div class="container wizard"><div class="card ti-result">
+        <div class="ic">${I.swap}</div><div class="lbl">${esc(q.label)}</div>
+        <div class="muted-lbl">${T('tiResult')}</div><div class="ti-price">${money(q.estimate)}</div>
+        ${q.breakdown.length ? `<ul class="ti-break">${q.breakdown.map((b) => `<li><span>${T(`qs_${b.q}`)}: <b>${T(`a_${b.q}_${b.a}`)}</b></span><b class="num">-${b.pct}%</b></li>`).join('')}</ul>` : ''}
+        <p class="ti-note">${I.shield}<span>${T('tiNote')}</span></p>
+        ${hasCart ? `<button class="btn btn-primary btn-block" id="useTi">${I.basket}${T('tiUse')}</button>` : ''}
+        <a class="btn ${hasCart ? 'btn-soft' : 'btn-primary'} btn-block" href="#/finder" id="shopTi" style="margin-top:10px">${I.spark}${T('tiShop')}</a>
+        <button class="btn btn-soft btn-block" id="againTi" style="margin-top:10px">${T('retake')}</button></div></div>`;
+      const save = () => { S.tradein = { model_id: st.model_id, answers: st.answers, estimate: q.estimate, label: q.label }; store.set('tradein', S.tradein); };
+      if (hasCart) $('#useTi').onclick = () => { save(); toast(T('tiApplied')); location.hash = '#/cart'; };
+      $('#shopTi').onclick = () => save(); // keep it: it will show in the cart later
+      $('#againTi').onclick = () => { st.answers = {}; stepBrand(); };
+    };
+    stepBrand();
+  }
+
+  // ================= phone finder =================
+  async function viewFinder() {
+    const st = { budget: null, os: null, uses: [], storage: 0 };
+    const B = [[0, 300000], [300000, 600000], [600000, 1000000], [1000000, 1500000], [1500000, 0], [0, 0]];
+    const bLabel = ([min, max]) => (!min && !max ? T('fAny') : !min ? T('upTo', { x: fmt(max) }) : !max ? T('over', { x: fmt(min) }) : `${fmt(min)} – ${fmt(max)}`);
+    const shell = (title, body, stepNo) => `${pageHead(T('finderTitle'))}<div class="container wizard">
+      <div class="wz-progress"><i style="width:${stepNo * 25}%"></i></div><div class="wz-step">${esc(T('step', { x: stepNo, y: 4 }))}</div><h2 class="wz-q">${title}</h2>${body}</div>`;
+    const s1 = () => {
+      app.innerHTML = shell(T('fBudget'), `<p class="wz-sub">${T('finderSub')}</p><div class="wz-options list">${B.map((b, i) => `<button class="wz-opt" data-i="${i}">${esc(bLabel(b))} ${b[0] || b[1] ? `<small>${T('currency')}</small>` : ''}</button>`).join('')}</div>`, 1);
+      app.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => { st.budget = B[Number(b.dataset.i)]; s2(); });
+    };
+    const s2 = () => {
+      app.innerHTML = shell(T('fOs'), `<div class="wz-options">${[['ios', T('iphone')], ['android', T('android')], ['', T('fAny')]].map(([k, l]) => `<button class="wz-opt" data-v="${k}">${l}</button>`).join('')}</div><button class="btn btn-soft wz-back">${T('back')}</button>`, 2);
+      app.querySelectorAll('[data-v]').forEach((b) => b.onclick = () => { st.os = b.dataset.v || null; s3(); });
+      app.querySelector('.wz-back').onclick = s1;
+    };
+    const s3 = () => {
+      const uses = ['camera', 'battery', 'gaming', 'social', 'basic'];
+      app.innerHTML = shell(T('fUses'), `<div class="wz-options">${uses.map((u) => `<button class="wz-opt ${st.uses.includes(u) ? 'on' : ''}" data-u="${u}">${T(`use_${u}`)}</button>`).join('')}</div>
+        <button class="btn btn-primary btn-block" id="n3" style="margin-top:14px">${T('next')}</button><button class="btn btn-soft wz-back">${T('back')}</button>`, 3);
+      app.querySelectorAll('[data-u]').forEach((b) => b.onclick = () => { const u = b.dataset.u; st.uses = st.uses.includes(u) ? st.uses.filter((x) => x !== u) : [...st.uses, u]; b.classList.toggle('on'); });
+      $('#n3').onclick = s4; app.querySelector('.wz-back').onclick = s2;
+    };
+    const s4 = () => {
+      app.innerHTML = shell(T('fStorage'), `<div class="wz-options">${[[64, '64GB+'], [128, '128GB+'], [256, '256GB+'], [0, T('dontKnow')]].map(([v, l]) => `<button class="wz-opt" data-v="${v}">${l}</button>`).join('')}</div><button class="btn btn-soft wz-back">${T('back')}</button>`, 4);
+      app.querySelectorAll('[data-v]').forEach((b) => b.onclick = () => { st.storage = Number(b.dataset.v); results(); });
+      app.querySelector('.wz-back').onclick = s3;
+    };
+    const card = (r) => {
+      productCache.set(r.product.id, r.product);
+      return `<div class="card fd-card ${r.best ? 'best' : ''}">
+        ${r.best ? `<span class="fd-badge">${I.star}${T('bestPick')}</span>` : r.best_value ? `<span class="fd-badge value">${T('bestValue')}</span>` : ''}
+        <a href="#/product/${r.product.id}" class="fd-img"><img src="${img(r.product.image)}" alt=""></a>
+        <div class="fd-body">
+          <div class="nm">${esc(L(r.product, 'name'))}${r.variant ? ` <span class="vlabel">${esc(r.variant.label)}</span>` : ''}</div>
+          ${money(r.price)}
+          ${r.match != null ? `<div class="fd-match"><div class="bar"><i style="width:${r.match}%"></i></div><span>${esc(T('match', { x: r.match }))}</span></div>` : ''}
+          <ul class="fd-reasons">${r.reasons.map((x) => `<li>${I.check}<span>${esc(T(`r_${x.code}`, { x: x.code === 'under_budget' ? `${fmt(x.x)} ${T('currency')}` : x.x }))}</span></li>`).join('')}</ul>
+          <div class="fd-actions"><a class="btn btn-soft" href="#/product/${r.product.id}">${T('viewProduct')}</a><button class="btn btn-primary" data-fadd="${r.product.id}" data-fvar="${r.variant ? r.variant.id : ''}">${I.basket}${T('addToCart')}</button></div>
+        </div></div>`;
+    };
+    const results = async () => {
+      app.innerHTML = '<div class="spinner"></div>';
+      const [min, max] = st.budget;
+      const qs = new URLSearchParams({ min, max, os: st.os || '', uses: st.uses.join(','), storage: st.storage });
+      const r = await api(`/finder?${qs}`).catch(() => ({ results: [], stretch: null }));
+      app.innerHTML = `${pageHead(T('finderTitle'))}<div class="container wizard wide">
+        ${r.results.length ? `<div class="fd-grid">${r.results.map(card).join('')}</div>`
+          : `<div class="empty" style="padding:30px 10px 10px"><div class="ic sq">${I.search}</div><h3>${T('noMatch')}</h3></div>
+             ${r.stretch ? `<p class="wz-sub" style="text-align:center">${esc(T('stretchHint', { x: `${fmt(r.stretch.over_by)} ${T('currency')}` }))}</p><div class="fd-grid">${card(r.stretch)}</div>` : ''}`}
+        <button class="btn btn-soft btn-block" id="retake" style="margin-top:16px">${T('retake')}</button>
+        ${S.settings.tradein_enabled === '1' ? `<a class="ti-banner" href="#/tradein" style="margin-top:12px">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}</div>`;
+      $('#retake').onclick = () => { st.uses = []; s1(); };
+      app.querySelectorAll('[data-fadd]').forEach((b) => b.onclick = () => {
+        const res = [...r.results, r.stretch].filter(Boolean).find((x) => x.product.id === Number(b.dataset.fadd));
+        addToCart(res.product, 1, res.variant || null);
+      });
+    };
+    s1();
+  }
+
   async function viewFaq() {
     app.innerHTML = `${pageHead(T('faq'))}<div class="container" style="max-width:760px;padding-top:18px" id="faqList"><div class="spinner"></div></div>`;
     const list = await api('/faqs').catch(() => []);
@@ -1074,7 +1225,7 @@
     app.onclick = null;
     S.waContext = '';
     // No floating button where the customer is finishing a purchase — it would cover the main button.
-    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset'].includes(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]);
+    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset', 'tradein', 'finder'].includes(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]);
     renderWhatsApp();
     closePanels();
     const [pathPart, query] = location.hash.replace(/^#/, '').split('?');
@@ -1105,6 +1256,8 @@
       case 'edit-profile': return viewEditProfile();
       case 'support': return viewSupport();
       case 'faq': return viewFaq();
+      case 'tradein': return viewTradein(qs.get('from') === 'cart');
+      case 'finder': return viewFinder();
       default: return viewHome();
     }
   }

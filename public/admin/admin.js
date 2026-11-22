@@ -9,10 +9,13 @@
   const getTok = () => { try { return JSON.parse(localStorage.getItem('token')); } catch { return null; } };
   let token = getTok();
 
+  const TI_ST = { pending: 'بانتظار الفحص', accepted: 'مقبول', adjusted: 'تم تعديل السعر', rejected: 'مرفوض (الزبون احتفظ بجهازه)', cancelled: 'ملغي' };
+  const TI_Q = { screen: ['الشاشة', { perfect: 'سليمة', scratches: 'خدوش خفيفة', cracked: 'مكسورة' }], body: ['الهيكل', { perfect: 'مثل الجديد', scratches: 'خدوش', damaged: 'ضربات/ظهر مكسور' }],
+    battery: ['البطارية', { good: '85%+', ok: '80–84%', weak: 'أقل من 80%' }], works: ['يشتغل كله؟', { yes: 'نعم', no: 'بيه عطل' }], box: ['الكرتونة والشاحن', { yes: 'موجود', no: 'غير موجود' }] };
   const ROLES = { admin: 'المالك (كل الصلاحيات)', manager: 'مدير', orders: 'موظف طلبات', products: 'موظف منتجات ومخزن' };
   const SRC = { tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', snapchat: 'Snapchat', friend: 'صديق', influencer: 'مؤثر', google: 'Google', store: 'من المحل', other: 'غير ذلك', unknown: 'لم يُحدد' };
   const ST = { pending: 'قيد الانتظار', preparing: 'قيد التجهيز', shipping: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
-  const ERR = { coupon_exists: 'هذا الكود موجود مسبقاً',  usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
+  const ERR = { tradein_model: 'الموديل غير متوفر',  coupon_exists: 'هذا الكود موجود مسبقاً',  usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
 
   async function api(path, opts = {}) {
     const headers = {};
@@ -75,7 +78,7 @@
   // [route, label, section] grouped like the menu. Each staff role only sees its sections.
   const NAV = [
     ['الرئيسية', [['dashboard', '📊 لوحة المعلومات', 'dashboard'], ['analytics', '👁️ تحليل الزوار', 'analytics']]],
-    ['المبيعات والطلبات', [['orders', '📦 الطلبات', 'orders'], ['users', '👥 الزبائن', 'customers'], ['carts', '🛒 السلات المتروكة', 'carts'], ['coupons', '🏷️ الكوبونات', 'coupons'], ['expenses', '💸 المصاريف والأرباح', 'expenses']]],
+    ['المبيعات والطلبات', [['orders', '📦 الطلبات', 'orders'], ['users', '👥 الزبائن', 'customers'], ['carts', '🛒 السلات المتروكة', 'carts'], ['tradein', '🔄 تبديل الأجهزة', 'tradein'], ['coupons', '🏷️ الكوبونات', 'coupons'], ['expenses', '💸 المصاريف والأرباح', 'expenses']]],
     ['المخزن والمنتجات', [['products', '📱 المنتجات', 'products'], ['bulk', '💱 تغيير الأسعار بالجملة', 'products'], ['categories', '🗂️ الأقسام', 'catalog'], ['presets', '📐 قوالب الأنواع والسعات', 'products'], ['tags', '🔖 ملصقات المنتجات', 'catalog'], ['stock', '📋 حركة المخزن', 'stock']]],
     ['الموقع', [['banners', '🖼️ البانرات', 'banners'], ['faqs', '❓ الأسئلة الشائعة', 'faqs'], ['settings', '⚙️ الإعدادات', 'admin_only']]],
     ['الأمان', [['staff', '🧑‍💼 مدراء النظام', 'admin_only'], ['security', '🔒 الأمان والنسخ', 'all']]],
@@ -166,7 +169,7 @@
       ${list.map((o) => `<tr>
         <td class="num"><b>${o.id}</b></td>
         <td>${esc(o.customer_name)}<br><a class="num muted" href="tel:${esc(o.phone)}">${esc(o.phone)}</a>
-          <div>${o.high_value ? '<span class="pill" style="background:#FFF4E5;color:#D97706">💰 قيمة عالية — اتصل للتأكيد</span> ' : ''}${o.phone_cancelled ? `<span class="pill" style="background:var(--red-soft);color:var(--red)">⚠️ ${o.phone_cancelled} طلب ملغي سابقاً</span> ` : ''}${o.customer_blocked ? '<span class="pill" style="background:var(--ink);color:#fff">🚫 محظور</span>' : ''}${o.coupon_code ? ` <span class="pill" style="background:#F1ECFE;color:#8B5CF6">🏷️ ${esc(o.coupon_code)}</span>` : ''}${o.source || o.utm ? ` <span class="pill" style="background:#EEF0F4;color:var(--ink-2)">📣 ${esc([SRC[o.source] || o.source, o.utm].filter(Boolean).join(' · '))}</span>` : ''}</div></td>
+          <div>${o.high_value ? '<span class="pill" style="background:#FFF4E5;color:#D97706">💰 قيمة عالية — اتصل للتأكيد</span> ' : ''}${o.phone_cancelled ? `<span class="pill" style="background:var(--red-soft);color:var(--red)">⚠️ ${o.phone_cancelled} طلب ملغي سابقاً</span> ` : ''}${o.customer_blocked ? '<span class="pill" style="background:var(--ink);color:#fff">🚫 محظور</span>' : ''}${o.coupon_code ? ` <span class="pill" style="background:#F1ECFE;color:#8B5CF6">🏷️ ${esc(o.coupon_code)}</span>` : ''}${o.tradein ? ` <span class="pill" style="background:#E6F7EF;color:#15803D">🔄 تبديل ${esc(o.tradein.label)}${o.tradein.status === 'pending' ? ' — افحص عند التسليم' : ''}</span>` : ''}${o.source || o.utm ? ` <span class="pill" style="background:#EEF0F4;color:var(--ink-2)">📣 ${esc([SRC[o.source] || o.source, o.utm].filter(Boolean).join(' · '))}</span>` : ''}</div></td>
         <td>${esc(o.city)}</td>
         ${full ? `<td class="order-items">${(o.items || []).map((i) => `${esc(i.name)}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × ${i.qty}`).join('<br>')}</td>` : ''}
         <td class="num"><b>${fmt(o.total)}</b></td>
@@ -198,6 +201,7 @@
           <tr><td>المنتجات</td><td class="num">${fmt(o.subtotal)}</td></tr>
           <tr><td>التوصيل</td><td class="num">${fmt(o.delivery_fee)}</td></tr>
           ${o.discount ? `<tr><td>كوبون ${esc(o.coupon_code)}</td><td class="num">-${fmt(o.discount)}</td></tr>` : ''}
+          ${o.tradein ? `<tr><td>🔄 تبديل ${esc(o.tradein.label)} <span class="muted">(${esc(TI_ST[o.tradein.status] || o.tradein.status)})</span></td><td class="num">-${fmt(o.tradein_credit)}</td></tr>` : ''}
           ${o.wallet_used ? `<tr><td>من المحفظة</td><td class="num">-${fmt(o.wallet_used)}</td></tr>` : ''}
           <tr><td><b>المطلوب من الزبون</b></td><td class="num"><b>${fmt(o.total)} د.ع</b></td></tr>
         </table>`);
@@ -295,6 +299,13 @@
         ${imgField('image', p.image, 'الصورة الرئيسية')}
         <div class="field full"><label>صور إضافية</label><label class="sm-btn" style="cursor:pointer;display:inline-block">+ إضافة صور<input type="file" accept="image/*" multiple hidden id="galUp"></label><div class="gallery-list" id="gal"></div></div>
         ${langFields('desc', p, 'الوصف', true)}
+        <div class="field full finder-box"><label>✨ بيانات «ساعدني أختار موبايل» — للموبايلات فقط (اتركها فارغة للإكسسوارات)</label>
+          <div class="fgrid3">
+            <div><span class="attr-lbl">النظام</span><select class="input sm" data-attr="os"><option value="">ليس موبايل</option><option value="ios" ${p.attrs?.os === 'ios' ? 'selected' : ''}>iOS (آيفون)</option><option value="android" ${p.attrs?.os === 'android' ? 'selected' : ''}>Android</option></select></div>
+            <div><span class="attr-lbl">الفئة</span><select class="input sm" data-attr="tier">${[['flagship', 'فئة عليا (رائد)'], ['upper', 'فوق المتوسط'], ['mid', 'متوسط'], ['entry', 'اقتصادي']].map(([k, l]) => `<option value="${k}" ${(p.attrs?.tier || 'mid') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            ${[['ram', 'الرام GB'], ['storage', 'المساحة GB'], ['battery', 'البطارية mAh'], ['camera', 'الكاميرا MP'], ['screen', 'الشاشة إنش'], ['charging', 'الشحن W']].map(([k, l]) => `<div><span class="attr-lbl">${l}</span><input class="input sm num" type="number" step="any" min="0" data-attr="${k}" value="${p.attrs?.[k] ?? ''}"></div>`).join('')}
+            <label class="g5"><input type="checkbox" data-attr="g5" ${p.attrs?.g5 ? 'checked' : ''}> 5G</label>
+          </div></div>
         <div class="field full"><label>📋 المواصفات (تظهر كجدول بصفحة المنتج)</label><div id="specs"></div><button type="button" class="sm-btn" id="addSpec">+ إضافة مواصفة</button>
           <span class="muted" style="font-size:12px;margin-inline-start:8px">مثل: الذاكرة 256GB · الرام 8GB · البطارية 4500mAh · الضمان سنة</span></div>
         ${tagsCache.length ? `<div class="field full"><label>🔖 الملصقات</label><div class="toggles">${tagsCache.map((t) => `<label><input type="checkbox" data-tag="${t.id}" ${(p.tag_ids || []).includes(t.id) ? 'checked' : ''}> <span class="pill" style="background:${esc(t.color)}22;color:${esc(t.color)}">${esc(t.name_ku)}</span></label>`).join('')}</div></div>` : ''}
@@ -423,6 +434,7 @@
         body.specs = specs.filter((x) => String(x.k).trim() && String(x.v).trim());
         body.bundle_ids = bundle;
         body.tag_ids = [...m.querySelectorAll('[data-tag]:checked')].map((x) => Number(x.dataset.tag));
+        body.attrs = Object.fromEntries([...m.querySelectorAll('[data-attr]')].map((el) => [el.dataset.attr, el.type === 'checkbox' ? el.checked : el.value]));
         if (variants.length && !body.variants.length) return toast('أكمل اسم وسعر كل نوع');
         if (body.variants.length) body.price = Math.min(...body.variants.map((v) => Number(v.price)));
         try {
@@ -653,7 +665,7 @@
     const c = layout('security', 'الأمان والنسخ الاحتياطي');
     const [me, backups, log] = await Promise.all([api('/me'), isOwner() ? api('/admin/backups') : [], isOwner() ? api('/admin/log') : []]);
     const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil(b / 1024)} KB`);
-    const ACTIONS = { stock_adjust: 'تعديل المخزن', expense_add: 'إضافة مصروف', expense_delete: 'حذف مصروف', bulk_price: 'تغيير أسعار بالجملة', variant_presets: 'قوالب الأنواع', staff_role: 'تغيير صلاحية موظف', coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
+    const ACTIONS = { tradein_model: 'تعديل سعر موديل تبديل', tradein_rules: 'نسب خصم التبديل', tradein_review: 'فحص جهاز تبديل', stock_adjust: 'تعديل المخزن', expense_add: 'إضافة مصروف', expense_delete: 'حذف مصروف', bulk_price: 'تغيير أسعار بالجملة', variant_presets: 'قوالب الأنواع', staff_role: 'تغيير صلاحية موظف', coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
     c.innerHTML = `
       <div class="card panel" id="tfaPanel"><h3>🔐 التحقق بخطوتين لحسابك</h3>
         ${me.user.totp_enabled ? `<p><span class="st delivered">مفعّل ✓</span> عند الدخول يُطلب رمز من تطبيق Authenticator.</p>
@@ -702,6 +714,71 @@
     if (off) off.onsubmit = async (e) => {
       e.preventDefault();
       try { await api('/me/2fa/disable', { method: 'POST', body: Object.fromEntries(new FormData(off)) }); toast('تم الإيقاف'); security(); } catch (err) { toast(err.message); }
+    };
+  }
+
+  // ---------- trade-in ----------
+  async function tradein() {
+    const tab = (location.hash.split('?t=')[1] || 'requests');
+    const c = layout('tradein', 'تبديل الأجهزة', `<div class="tabs-lang">${[['requests', 'الطلبات'], ['prices', 'أسعار الموديلات'], ['rules', 'نسب الخصم']].map(([k, l]) => `<a href="#/tradein?t=${k}"><button class="${tab === k ? 'active' : ''}">${l}</button></a>`).join('')}</div>`);
+    if (tab === 'prices') return tradeinPrices(c);
+    if (tab === 'rules') return tradeinRules(c);
+    const list = await api('/admin/tradeins');
+    c.innerHTML = `<div class="card panel" style="background:#F3FBF7;border:2px solid #BFE8D4">💡 عند التسليم افحص الجهاز القديم: إذا مطابق اضغط <b>قبول</b>، إذا حالته أقل غيّر السعر (المبلغ المطلوب من الزبون يتحدث تلقائياً)، وإذا الزبون غيّر رأيه اضغط <b>رفض</b>.</div>
+      <div class="card panel">${list.length ? `<table class="t"><thead><tr><th>#</th><th>الطلب</th><th>الجهاز</th><th>حالته حسب الزبون</th><th>التقدير</th><th>الحالة</th><th></th></tr></thead>${list.map((t) => `<tr>
+        <td class="num">${t.id}</td>
+        <td>${t.order_id ? `<b class="num">#${t.order_id}</b><br><span class="muted">${esc(t.customer_name || '')} · <a class="num" href="tel:${esc(t.phone || '')}">${esc(t.phone || '')}</a></span>` : '—'}</td>
+        <td><b>${esc(t.label)}</b>${t.imei ? `<br><span class="muted num">IMEI ${esc(t.imei)}</span>` : ''}${t.note ? `<br><span class="muted">${esc(t.note)}</span>` : ''}</td>
+        <td class="order-items">${Object.entries(t.answers).map(([q, a]) => `${esc((TI_Q[q] || [q])[0])}: <b>${esc((TI_Q[q] || [0, {}])[1][a] || a)}</b>`).join('<br>')}</td>
+        <td class="num"><b>${fmt(t.estimate)}</b>${t.final_value != null && t.final_value !== t.estimate ? `<br><span style="color:var(--brand)">النهائي ${fmt(t.final_value)}</span>` : ''}</td>
+        <td><span class="st ${t.status === 'pending' ? 'pending' : t.status === 'rejected' || t.status === 'cancelled' ? 'cancelled' : 'delivered'}">${esc(TI_ST[t.status] || t.status)}</span></td>
+        <td>${t.status === 'pending' ? `<div class="row-actions"><button class="sm-btn primary" data-ti="${t.id}" data-act="accepted">قبول</button><button class="sm-btn" data-ti="${t.id}" data-act="adjusted">تعديل السعر</button><button class="sm-btn danger" data-ti="${t.id}" data-act="rejected">رفض</button></div>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">لا توجد طلبات تبديل بعد</p>'}</div>`;
+    c.querySelectorAll('[data-ti]').forEach((b) => b.onclick = () => {
+      const t = list.find((x) => x.id === Number(b.dataset.ti)); const act = b.dataset.act;
+      modal(`${act === 'accepted' ? 'قبول' : act === 'adjusted' ? 'تعديل سعر' : 'رفض'} — ${esc(t.label)}`, `<form id="tif">
+        ${act === 'adjusted' ? `<div class="field"><label>السعر النهائي بعد الفحص (د.ع) — التقدير كان ${fmt(t.estimate)}</label><input class="input num" type="number" min="0" name="final_value" required value="${t.estimate}"></div>` : ''}
+        ${act !== 'rejected' ? `<div class="field"><label>IMEI الجهاز (اكتب *#06# بالجهاز)</label><input class="input num" name="imei" dir="ltr" maxlength="20"></div>` : ''}
+        <div class="field"><label>ملاحظة</label><input class="input" name="note" placeholder="${act === 'rejected' ? 'سبب الرفض' : 'خدش بالظهر، البطارية 82%...'}"></div>
+        <p class="muted">${act === 'rejected' ? 'الزبون يحتفظ بجهازه ويدفع المبلغ كامل.' : 'المبلغ المطلوب من الزبون يتحدث تلقائياً.'}</p>
+        <button class="btn btn-primary btn-block">تأكيد</button></form>`, (m, close) => {
+        m.querySelector('#tif').onsubmit = async (e) => {
+          e.preventDefault();
+          try { const r = await api(`/admin/tradeins/${t.id}`, { method: 'PUT', body: { status: act, ...Object.fromEntries(new FormData(e.target)) } }); toast(`تم — قيمة الجهاز ${fmt(r.final_value)} د.ع`); close(); tradein(); }
+          catch (err) { toast(err.message); }
+        };
+      });
+    });
+  }
+  async function tradeinPrices(c) {
+    const list = await api('/admin/tradein-models');
+    c.innerHTML = `<div class="card panel warn-box">⚠️ الأسعار الحالية <b>تجريبية</b> — حدّثها حسب سعر السوق للجهاز المستعمل بحالة ممتازة. الخصومات تنطبق عليها تلقائياً حسب أجوبة الزبون.</div>
+      <div class="card panel"><table class="t var-table"><thead><tr><th>الماركة</th><th>الموديل</th><th>السعة GB</th><th>السعر بحالة ممتازة (د.ع)</th><th>ظاهر</th><th></th></tr></thead><tbody>
+      ${list.map((x) => `<tr data-row="${x.id}"><td><input class="input sm" name="brand" value="${esc(x.brand)}"></td><td><input class="input sm" name="model" value="${esc(x.model)}"></td>
+        <td><input class="input sm num" type="number" name="storage_gb" value="${x.storage_gb}" style="width:90px"></td><td><input class="input sm num" type="number" name="base_price" value="${x.base_price}"></td>
+        <td><input type="checkbox" name="active" ${x.active ? 'checked' : ''}></td><td><div class="row-actions"><button class="sm-btn primary" data-save="${x.id}">حفظ</button><button class="sm-btn danger" data-del="${x.id}">×</button></div></td></tr>`).join('')}
+      <tr data-row="new"><td><input class="input sm" name="brand" placeholder="Apple"></td><td><input class="input sm" name="model" placeholder="iPhone 16"></td><td><input class="input sm num" type="number" name="storage_gb" placeholder="128" style="width:90px"></td>
+        <td><input class="input sm num" type="number" name="base_price" placeholder="900000"></td><td><input type="checkbox" name="active" checked></td><td><button class="sm-btn primary" data-save="new">+ إضافة</button></td></tr>
+      </tbody></table></div>`;
+    const rowBody = (id) => { const r = c.querySelector(`[data-row="${id}"]`); return { brand: r.querySelector('[name=brand]').value, model: r.querySelector('[name=model]').value, storage_gb: r.querySelector('[name=storage_gb]').value, base_price: r.querySelector('[name=base_price]').value, active: r.querySelector('[name=active]').checked }; };
+    c.querySelectorAll('[data-save]').forEach((b) => b.onclick = async () => {
+      const id = b.dataset.save;
+      try { await api(id === 'new' ? '/admin/tradein-models' : `/admin/tradein-models/${id}`, { method: id === 'new' ? 'POST' : 'PUT', body: rowBody(id) }); toast('تم الحفظ'); if (id === 'new') tradeinPrices(c); } catch (e) { toast(e.message); }
+    });
+    c.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!confirm('حذف الموديل؟')) return; await api(`/admin/tradein-models/${b.dataset.del}`, { method: 'DELETE' }); tradeinPrices(c); });
+  }
+  async function tradeinRules(c) {
+    const st = await api('/admin/settings');
+    let rules = {}; try { rules = JSON.parse(st.tradein_rules || '{}'); } catch { rules = {}; }
+    c.innerHTML = `<form class="card panel" id="trf" style="max-width:720px">
+      <div class="toggles"><label><input type="checkbox" name="enabled" ${st.tradein_enabled === '1' ? 'checked' : ''}> تفعيل «بدّل جهازك القديم» بالمتجر</label></div>
+      <p class="muted">النسبة تنخصم من سعر الموديل حسب جواب الزبون. المجموع الأقصى 80%، والنتيجة تتقرّب لأقرب 5,000 د.ع للأسفل.</p>
+      ${Object.entries(TI_Q).map(([q, [label, opts]]) => `<div class="field"><label>${label}</label><div class="fgrid3">${Object.entries(opts).map(([o, ol]) => `<div><span class="muted" style="font-size:12.5px">${ol}</span><div class="pct"><input class="input sm num" type="number" min="0" max="90" step="0.5" data-q="${q}" data-o="${o}" value="${rules[q]?.[o] ?? 0}"><b>%</b></div></div>`).join('')}</div></div>`).join('')}
+      <button class="btn btn-primary">حفظ</button></form>`;
+    $('#trf').onsubmit = async (e) => {
+      e.preventDefault();
+      const out = {};
+      c.querySelectorAll('[data-q]').forEach((i) => { (out[i.dataset.q] = out[i.dataset.q] || {})[i.dataset.o] = Number(i.value) || 0; });
+      try { await api('/admin/tradein-rules', { method: 'PUT', body: { rules: out, enabled: e.target.enabled.checked } }); toast('تم الحفظ'); } catch (err) { toast(err.message); }
     };
   }
 
@@ -927,7 +1004,7 @@
   }
 
   // ---------- router ----------
-  const ROUTES = { dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
+  const ROUTES = { tradein, dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
   async function render() {
     if (!token) return showLogin();
     if (!ME) { try { ME = await api('/me'); } catch { return; } if (ME.user.role === 'customer') return showLogin(ERR.forbidden); }
