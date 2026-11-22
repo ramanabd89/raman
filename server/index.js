@@ -12,6 +12,7 @@ const { newSecret, verifyTotp, otpauthUrl } = require('./totp');
 const { processUpload, ogImageFor } = require('./images');
 const { normalize, searchClause } = require('./search');
 const extrasModule = require('./extras');
+const smart = require('./smart');
 const { isStaff } = extrasModule;
 let extras = { recordStock: () => {}, pruneAnalytics: () => {} }; // filled in once the admin router exists
 
@@ -48,7 +49,7 @@ const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancel
 const ORDER_SOURCES = ['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
   'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text',
-  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate'];
+  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled'];
 const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_round', 'min_profit'];
 // Secret admin address, e.g. ADMIN_PATH=/the-gate (default /admin).
 const ADMIN_PATH = '/' + String(process.env.ADMIN_PATH || '/admin').replace(/^\/+|\/+$/g, '').replace(/[^\w-]/g, '');
@@ -68,7 +69,7 @@ function publicUser(u) {
 const parseJson = (v, d) => { try { const x = JSON.parse(v); return x ?? d; } catch { return d; } };
 function productOut(p, isAdmin = false) {
   if (!p) return p;
-  const out = { ...p, images: parseJson(p.images || '[]', []), specs: parseJson(p.specs || '[]', []), bundle_ids: parseJson(p.bundle_ids || '[]', []),
+  const out = { ...p, images: parseJson(p.images || '[]', []), specs: parseJson(p.specs || '[]', []), bundle_ids: parseJson(p.bundle_ids || '[]', []), attrs: parseJson(p.attrs || '{}', {}),
     featured: !!p.featured, trending: !!p.trending, flash_sale: !!p.flash_sale, active: !!p.active, has_variants: p.variant_count > 0 };
   if (!isAdmin) { delete out.cost_price; delete out.search_text; delete out.bundle_ids; }
   return out;
@@ -445,7 +446,8 @@ app.delete('/api/me/addresses/:id', requireUser, wrap((req, res) => {
 function orderWithItems(o) {
   if (!o) return o;
   // purchase cost stays on the server (used for profit reports only)
-  return { ...o, items: db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id).map(({ cost, ...it }) => it) };
+  const t = o.tradein_id ? db.prepare('SELECT id, label, estimate, final_value, status, answers FROM tradeins WHERE id = ?').get(o.tradein_id) : null;
+  return { ...o, items: db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id).map(({ cost, ...it }) => it), tradein: t ? { ...t, answers: parseJson(t.answers, {}) } : null };
 }
 
 // ---- coupons (influencer / campaign codes) ----
@@ -544,9 +546,17 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
       db.prepare('UPDATE coupons SET uses = uses + 1 WHERE id = ?').run(c.coupon.id);
     }
     const delivery = deliveryFor(city, subtotal - discount, s);
+    // Trade-in: estimated value of the customer's old phone, confirmed when the courier/shop inspects it.
+    let tradein = null; let tradeinCredit = 0;
+    if (req.body.tradein && req.body.tradein.model_id) {
+      if (s.tradein_enabled !== '1') throw new HttpError(400, 'tradein_disabled');
+      tradein = smart.quoteTradein(db, s, req.body.tradein.model_id, req.body.tradein.answers);
+      if (tradein.error) throw new HttpError(400, tradein.error);
+      tradeinCredit = Math.min(tradein.estimate, subtotal - discount);
+    }
     const user = db.prepare('SELECT wallet FROM users WHERE id = ?').get(req.user.id);
-    const walletUsed = req.body.use_wallet ? Math.min(user.wallet, subtotal - discount + delivery) : 0;
-    const total = subtotal - discount + delivery - walletUsed;
+    const walletUsed = req.body.use_wallet ? Math.min(user.wallet, subtotal - discount - tradeinCredit + delivery) : 0;
+    const total = subtotal - discount - tradeinCredit + delivery - walletUsed;
     const source = ORDER_SOURCES.includes(req.body.source) ? req.body.source : null;
     const utm = str(req.body.utm, 100).replace(/[^\w\-.:/ ]/g, '') || null;
     const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total, discount, coupon_code, source, utm)
@@ -558,12 +568,17 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
       extras.recordStock({ productId: p.id, variantId: variant ? variant.id : null, delta: -qty, reason: 'order', ref: `#${oid}`, userName: name });
     }
     db.prepare('DELETE FROM carts WHERE user_id = ?').run(req.user.id);
+    if (tradein) {
+      const tid = Number(db.prepare('INSERT INTO tradeins(user_id, order_id, model_id, label, answers, estimate) VALUES(?,?,?,?,?,?)')
+        .run(req.user.id, oid, tradein.model.id, tradein.label, JSON.stringify(tradein.answers), tradein.estimate).lastInsertRowid);
+      db.prepare('UPDATE orders SET tradein_id = ?, tradein_credit = ? WHERE id = ?').run(tid, tradeinCredit, oid);
+    }
     if (walletUsed) db.prepare('UPDATE users SET wallet = wallet - ? WHERE id = ?').run(walletUsed, req.user.id);
     return db.prepare('SELECT * FROM orders WHERE id = ?').get(oid);
   });
   const full = orderWithItems(order);
   const highValue = int(s.confirm_over, 0) > 0 && order.total + order.wallet_used >= int(s.confirm_over, 0);
-  notify(orderMessage(order, full.items, { highValue, publicUrl: PUBLIC_URL }));
+  notify(orderMessage({ ...full, tradein_label: full.tradein && full.tradein.label }, full.items, { highValue, publicUrl: PUBLIC_URL }));
   res.json(full);
 }));
 
@@ -590,6 +605,7 @@ function cancelOrder(o, userName = null) {
   if (o.cashback && o.user_id) db.prepare('UPDATE users SET wallet = MAX(wallet - ?, 0) WHERE id = ?').run(o.cashback, o.user_id);
   if (o.wallet_used && o.user_id) db.prepare('UPDATE users SET wallet = wallet + ? WHERE id = ?').run(o.wallet_used, o.user_id);
   if (o.coupon_code) db.prepare('UPDATE coupons SET uses = MAX(uses - 1, 0) WHERE code = ?').run(o.coupon_code);
+  if (o.tradein_id) db.prepare("UPDATE tradeins SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(o.tradein_id);
 }
 
 app.post('/api/orders/:id/cancel', requireUser, wrap((req, res) => {
@@ -608,6 +624,7 @@ app.post('/api/orders/:id/cancel', requireUser, wrap((req, res) => {
 const admin = express.Router();
 admin.use(requireAdmin);
 extras = extrasModule.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, requireUser, getSettings, setSetting, priceItems, repriceUsd, syncProductFromVariants });
+smart.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, getSettings, setSetting, productOut, variantsOf, publicVariant });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -714,7 +731,7 @@ admin.put('/orders/:id', wrap((req, res) => {
 
 // products
 admin.get('/products', wrap((req, res) => res.json(adminDecorate(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true }))))));
-const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids'];
+const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids', 'attrs'];
 function productValues(b) {
   const v = {
     category_id: b.category_id ? int(b.category_id) : null,
@@ -729,6 +746,7 @@ function productValues(b) {
     cost_price: b.cost_price !== '' && b.cost_price != null ? Math.max(0, int(b.cost_price)) : null,
     specs: JSON.stringify((Array.isArray(b.specs) ? b.specs : []).slice(0, 30).map((x) => ({ k: str(x && x.k, 60), v: str(x && x.v, 200) })).filter((x) => x.k && x.v)),
     bundle_ids: JSON.stringify((Array.isArray(b.bundle_ids) ? b.bundle_ids : []).map((x) => int(x)).filter((x) => x > 0).slice(0, 4)),
+    attrs: JSON.stringify(cleanAttrs(b.attrs)),
   };
   v.tag_ids = (Array.isArray(b.tag_ids) ? b.tag_ids : []).map((x) => int(x)).filter((x) => x > 0).slice(0, 10);
   // USD-priced products: the admin types prices in dollars; IQD prices are calculated from the rate.
@@ -756,6 +774,13 @@ function productValues(b) {
   if (v.variants.length) { v.price = Math.min(...v.variants.map((x) => x.price)); v.stock = v.variants.reduce((a, x) => a + x.stock, 0); }
   if (!v.name_ku || !v.price) throw new HttpError(400, 'invalid_input');
   return v;
+}
+// Phone-finder data (only for phones): os, tier, ram, storage, battery, camera, screen, charging, 5G
+function cleanAttrs(a) {
+  if (!a || typeof a !== 'object' || !['ios', 'android'].includes(a.os)) return {};
+  const n = (x, max) => Math.max(0, Math.min(Number(x) || 0, max));
+  return { os: a.os, tier: ['flagship', 'upper', 'mid', 'entry'].includes(a.tier) ? a.tier : 'mid', ram: n(a.ram, 32), storage: n(a.storage, 2048),
+    battery: n(a.battery, 10000), camera: n(a.camera, 300), screen: n(a.screen, 10), charging: n(a.charging, 300), g5: !!a.g5 };
 }
 function saveVariants(productId, variants) {
   const keep = variants.filter((x) => x.id).map((x) => x.id);

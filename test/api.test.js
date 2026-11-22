@@ -304,6 +304,48 @@ let stop = () => {};
   check('maintenance blocks customer orders', r.status === 503 && r.data.error === 'maintenance', r);
   await call('/admin/settings', { method: 'PUT', token: A2, body: { maintenance_mode: '0' } });
 
+  // ---------- trade-in ----------
+  r = await call('/tradein/models');
+  check('trade-in models listed', r.data.enabled && r.data.models.length >= 10, r.data);
+  const iphone14 = r.data.models.find((m) => m.model === 'iPhone 14');
+  const good = { screen: 'perfect', body: 'perfect', battery: 'good', works: 'yes', box: 'yes' };
+  r = await call('/tradein/quote', { method: 'POST', body: { model_id: iphone14.id, answers: good } });
+  check('perfect phone = full base price', r.data.estimate === 600000, r.data);
+  r = await call('/tradein/quote', { method: 'POST', body: { model_id: iphone14.id, answers: { ...good, screen: 'cracked', works: 'no' } } });
+  check('cracked + faulty: 65% off, rounded to 5,000', r.data.estimate === 210000 && r.data.deduction_pct === 65, r.data);
+  r = await call('/tradein/quote', { method: 'POST', body: { model_id: iphone14.id, answers: { ...good, screen: 'cracked', body: 'damaged', battery: 'weak', works: 'no', box: 'no' } } });
+  check('deductions capped at 80%', r.data.estimate === 120000 && r.data.deduction_pct === 80, r.data);
+  r = await call('/tradein/quote', { method: 'POST', body: { model_id: iphone14.id, answers: { ...good, screen: 'hacked' } } });
+  check('invalid answer rejected', r.data.error === 'tradein_answers', r.data);
+
+  // order with trade-in: credit capped at products total, admin adjusts after inspection
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { max_pending_orders: '0' } });
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 2, qty: 1 }], city: 'Erbil', address: 'x', tradein: { model_id: iphone14.id, answers: { ...good, battery: 'ok' } } } });
+  const TO = r.data;
+  check('order takes trade-in credit off the total', TO.tradein_credit === 550000 && TO.total === 1150000 - 550000 + 3000 && TO.tradein.label === 'Apple iPhone 14 128GB', { credit: TO.tradein_credit, total: TO.total });
+  r = await call('/admin/tradeins', { token: A2 });
+  const TI = r.data.find((t) => t.order_id === TO.id);
+  check('admin sees trade-in request', TI && TI.status === 'pending' && TI.answers.battery === 'ok', TI);
+  r = await call(`/admin/tradeins/${TI.id}`, { method: 'PUT', token: A2, body: { status: 'adjusted', final_value: 500000, imei: '356789012345678', note: 'scratch on back' } });
+  const TO2 = (await call(`/orders/${TO.id}`, { token: Q })).data;
+  check('adjusted value updates what the customer pays', TO2.tradein_credit === 500000 && TO2.total === TO.total + 50000, { credit: TO2.tradein_credit, total: TO2.total });
+  await call(`/admin/tradeins/${TI.id}`, { method: 'PUT', token: A2, body: { status: 'rejected' } });
+  check('rejected trade-in removes the credit', (await call(`/orders/${TO.id}`, { token: Q })).data.total === 1150000 + 3000);
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 14, qty: 1 }], city: 'Erbil', address: 'x', tradein: { model_id: iphone14.id, answers: good } } });
+  check('trade-in credit never exceeds the products total', r.data.tradein_credit === 5000 && r.data.total === 3000, { credit: r.data.tradein_credit, total: r.data.total });
+  await call(`/admin/orders/${r.data.id}`, { method: 'PUT', token: A2, body: { status: 'cancelled' } });
+  check('cancelling the order cancels the trade-in', (await call('/admin/tradeins', { token: A2 })).data.find((t) => t.order_id === r.data.id).status === 'cancelled');
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { max_pending_orders: '2' } });
+
+  // ---------- phone finder ----------
+  r = await call('/finder?max=2000000&uses=camera');
+  check('finder returns up to 3 phones with best pick', r.data.results.length >= 2 && r.data.results.length <= 3 && r.data.results[0].best && r.data.results.every((x) => x.price <= 2000000), r.data.results.map((x) => [x.product.name_en, x.match]));
+  check('finder never exposes cost price', r.data.results.every((x) => x.product.cost_price === undefined));
+  r = await call('/finder?max=1500000&os=ios&uses=camera,social');
+  check('finder respects iPhone-only + budget', r.data.results.length && r.data.results.every((x) => x.attrs.os === 'ios' && x.price <= 1500000), r.data.results.map((x) => x.product.name_en));
+  r = await call('/finder?max=100000&uses=basic');
+  check('nothing in budget → closest phone above it', !r.data.results.length && r.data.stretch && r.data.stretch.over_by > 0, r.data);
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);

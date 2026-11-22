@@ -5,8 +5,8 @@ const crypto = require('crypto');
 // ---- staff roles: which admin sections each role may open ----
 const ROLE_SECTIONS = {
   admin: '*',
-  manager: ['dashboard', 'orders', 'customers', 'carts', 'products', 'catalog', 'stock', 'coupons', 'expenses', 'analytics', 'faqs', 'banners'],
-  orders: ['dashboard', 'orders', 'customers', 'carts'],
+  manager: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'products', 'catalog', 'stock', 'coupons', 'expenses', 'analytics', 'faqs', 'banners'],
+  orders: ['dashboard', 'orders', 'customers', 'carts', 'tradein'],
   products: ['dashboard', 'products', 'catalog', 'stock'],
 };
 const STAFF_ROLES = Object.keys(ROLE_SECTIONS);
@@ -16,7 +16,7 @@ const SECTION_OF = {
   stats: 'dashboard', orders: 'orders', users: 'customers', carts: 'carts',
   products: 'products', upload: 'products', 'bulk-price': 'products', 'variant-presets': 'products',
   categories: 'catalog', tags: 'catalog', stock: 'stock', coupons: 'coupons',
-  expenses: 'expenses', profit: 'expenses', analytics: 'analytics', faqs: 'faqs', banners: 'banners',
+  expenses: 'expenses', profit: 'expenses', tradeins: 'tradein', 'tradein-models': 'tradein', 'tradein-rules': 'tradein', analytics: 'analytics', faqs: 'faqs', banners: 'banners',
 };
 function canAccess(role, section) {
   const allowed = ROLE_SECTIONS[role];

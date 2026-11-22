@@ -35,6 +35,7 @@ function orderMessage(order, items, { highValue, publicUrl } = {}) {
     ...lines,
     '',
     order.discount ? `🏷️ كوبون ${escHtml(order.coupon_code)}: -${fmt(order.discount)}` : null,
+    order.tradein_credit ? `🔄 تبديل جهاز (${escHtml(order.tradein_label || '')}): -${fmt(order.tradein_credit)} — <b>افحص الجهاز عند التسليم</b>` : null,
     `🚚 التوصيل: ${fmt(order.delivery_fee)}`,
     order.wallet_used ? `👛 من المحفظة: -${fmt(order.wallet_used)}` : null,
     `💰 <b>المطلوب: ${fmt(order.total)} د.ع</b>`,

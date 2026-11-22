@@ -141,6 +141,35 @@ addColumn('products', 'specs', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('products', 'bundle_ids', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('order_items', 'cost', 'INTEGER');
 addColumn('orders', 'cashback', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('products', 'attrs', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('orders', 'tradein_id', 'INTEGER');
+addColumn('orders', 'tradein_credit', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+CREATE TABLE IF NOT EXISTS tradein_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  brand TEXT NOT NULL,
+  model TEXT NOT NULL,
+  storage_gb INTEGER NOT NULL,
+  base_price INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS tradeins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  order_id INTEGER,
+  model_id INTEGER,
+  label TEXT NOT NULL,
+  answers TEXT NOT NULL,
+  estimate INTEGER NOT NULL,
+  final_value INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending',
+  imei TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
 db.exec(`
 CREATE TABLE IF NOT EXISTS product_variants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -400,6 +429,8 @@ function bannerSvg(c1, c2, kind) {
 seed();
 for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
   slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',
+  tradein_enabled: '1',
+  tradein_rules: JSON.stringify({ screen: { perfect: 0, scratches: 10, cracked: 35 }, body: { perfect: 0, scratches: 8, damaged: 20 }, battery: { good: 0, ok: 8, weak: 15 }, works: { yes: 0, no: 30 }, box: { yes: 0, no: 3 } }),
   variant_presets: JSON.stringify([{ name: 'Storage', values: ['64GB', '128GB', '256GB', '512GB', '1TB'] }, { name: 'Color', values: ['Black', 'White', 'Blue', 'Gold', 'Silver'] }]) })) {
   if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(k) == null) setSetting(k, v);
 }
@@ -409,6 +440,26 @@ if (db.prepare('SELECT COUNT(*) n FROM faqs').get().n === 0 && db.prepare("SELEC
   ins.run('پارەدان چۆنە؟', 'كيف أدفع؟', 'How do I pay?', 'پارە لە کاتی گەیشتنی کاڵاکە دەدەیت.', 'تدفع عند استلام الطلب.', 'You pay cash when the order arrives.', 1);
   ins.run('گەیاندن چەند دەخایەنێت؟', 'كم يستغرق التوصيل؟', 'How long does delivery take?', 'بەپێی شار؛ لە پەڕەی تەواوکردنی داواکاری دەیبینیت.', 'حسب المدينة، يظهر لك عند إتمام الطلب.', 'It depends on the city — you will see it at checkout.', 2);
   setSetting('faq_seeded', '1');
+}
+if (db.prepare('SELECT COUNT(*) n FROM tradein_models').get().n === 0 && db.prepare("SELECT value FROM settings WHERE key = 'tradein_seeded'").get() == null) {
+  // Demo prices (IQD, good condition) — the shop owner must replace them with real market prices.
+  const ins = db.prepare('INSERT INTO tradein_models(brand, model, storage_gb, base_price, sort) VALUES(?,?,?,?,?)');
+  const list = [
+    ['Apple', 'iPhone 11', 64, 260000], ['Apple', 'iPhone 11', 128, 290000], ['Apple', 'iPhone 12', 128, 380000], ['Apple', 'iPhone 13', 128, 500000],
+    ['Apple', 'iPhone 13 Pro Max', 256, 720000], ['Apple', 'iPhone 14', 128, 600000], ['Apple', 'iPhone 14 Pro Max', 256, 950000], ['Apple', 'iPhone 15', 128, 780000], ['Apple', 'iPhone 15 Pro Max', 256, 1200000],
+    ['Samsung', 'Galaxy A34', 128, 190000], ['Samsung', 'Galaxy A54', 128, 260000], ['Samsung', 'Galaxy S22 Ultra', 256, 520000], ['Samsung', 'Galaxy S23 Ultra', 256, 750000], ['Samsung', 'Galaxy S24 Ultra', 256, 1000000],
+    ['Xiaomi', 'Redmi Note 12', 128, 120000], ['Xiaomi', 'Redmi Note 13 Pro', 256, 210000],
+  ];
+  list.forEach(([b, m, st, p], i) => ins.run(b, m, st, p, i));
+  const attrs = {
+    1: { os: 'ios', tier: 'flagship', ram: 8, storage: 256, battery: 4685, camera: 48, screen: 6.9, charging: 30, g5: true },
+    2: { os: 'ios', tier: 'upper', ram: 6, storage: 128, battery: 3349, camera: 48, screen: 6.1, charging: 20, g5: true },
+    3: { os: 'android', tier: 'flagship', ram: 12, storage: 256, battery: 5000, camera: 200, screen: 6.8, charging: 45, g5: true },
+    4: { os: 'android', tier: 'mid', ram: 8, storage: 128, battery: 5000, camera: 50, screen: 6.6, charging: 25, g5: true },
+    5: { os: 'android', tier: 'mid', ram: 8, storage: 256, battery: 5100, camera: 200, screen: 6.67, charging: 67, g5: false },
+  };
+  for (const [id, a] of Object.entries(attrs)) db.prepare("UPDATE products SET attrs = ? WHERE id = ? AND attrs = '{}'").run(JSON.stringify(a), Number(id));
+  setSetting('tradein_seeded', '1');
 }
 // Delivery zones: [{ name, fee }]. Built once from the old comma-separated "cities" list.
 if (db.prepare("SELECT 1 FROM settings WHERE key = 'delivery_zones'").get() == null) {
