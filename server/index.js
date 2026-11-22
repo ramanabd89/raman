@@ -2,6 +2,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
+const compression = require('compression');
 const { db, tx, hashPassword, verifyPassword, newReferralCode, getSettings, setSetting, UPLOAD_DIR } = require('./db');
 const fs = require('fs');
 const { sendOtp, verifyOtp, OtpError, PROVIDER: SMS_PROVIDER } = require('./sms');
@@ -17,10 +18,28 @@ let extras = { recordStock: () => {}, pruneAnalytics: () => {} }; // filled in o
 const app = express();
 app.disable('x-powered-by');
 if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY); // e.g. 1 behind Nginx / a PaaS, so rate limits see the real client IP
+app.use(compression()); // gzip: pages and scripts are ~4× smaller on mobile data
 app.use(express.json({ limit: '1mb' }));
+// Security headers. The CSP only allows our own scripts (+ cdnjs for the admin QR code) and Google Fonts.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' https://cdnjs.cloudflare.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join('; ');
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Frame-Options', 'DENY'); // nobody can embed the shop/admin in a frame (clickjacking)
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Content-Security-Policy', CSP);
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
@@ -134,7 +153,7 @@ app.use('/api', auth);
 
 // Rate limiting stored in the database, so it survives restarts. Keys look like "ip:1.2.3.4" or "phone:0750...".
 const WINDOW_MS = 15 * 60 * 1000;
-const LIMITS = { ip: 30, phone: 8 };
+const LIMITS = { ip: 30, phone: 8, coupon: 15 };
 function failures(key) { return db.prepare('SELECT COUNT(*) n FROM auth_failures WHERE key = ? AND ts > ?').get(key, Date.now() - WINDOW_MS).n; }
 function checkLimit(keys) {
   for (const k of keys) if (failures(k) >= LIMITS[k.split(':')[0]]) throw new HttpError(429, 'too_many_attempts');
@@ -456,9 +475,14 @@ function priceItems(rawItems) {
   });
 }
 app.post('/api/coupons/check', wrap((req, res) => {
+  const keys = [`coupon:${req.ip}`];
+  checkLimit(keys); // stops guessing codes: 15 wrong codes per 15 minutes
   const items = priceItems(req.body.items);
   const subtotal = items.reduce((a, it) => a + (it.available ? it.price * it.qty : 0), 0);
-  const { coupon, discount } = evaluateCoupon(req.body.code, req.user && req.user.id, subtotal);
+  let result;
+  try { result = evaluateCoupon(req.body.code, req.user && req.user.id, subtotal); }
+  catch (e) { if (e.code === 'coupon_invalid') recordFailure(keys); throw e; }
+  const { coupon, discount } = result;
   res.json({ code: coupon.code, type: coupon.type, value: coupon.value, discount });
 }));
 
@@ -997,12 +1021,13 @@ function renderIndex(req, res, meta = {}) {
     image ? `<meta property="og:image" content="${attr(base + image)}">` : '',
     image ? '<meta name="twitter:card" content="summary_large_image">' : '',
     meta.price ? `<meta property="product:price:amount" content="${meta.price}"><meta property="product:price:currency" content="IQD">` : '',
-    meta.redirect ? `<script>location.replace(${JSON.stringify(meta.redirect)})</script>` : '',
+    meta.redirect ? `<meta http-equiv="refresh" content="0;url=${attr(meta.redirect)}">` : '',
   ].filter(Boolean).join('\n  ');
   const html = indexHtml
     .replace(/<title>[^<]*<\/title>/, `<title>${attr(title)}</title>`)
     .replace(/<meta name="description" content="[^"]*">/, `<meta name="description" content="${attr(desc)}">`)
     .replace('</head>', `  ${tags}\n</head>`);
+  res.setHeader('Cache-Control', 'no-cache'); // always fresh HTML; scripts/styles are cached for an hour
   res.type('html').send(html);
 }
 // Shareable product link: /p/12 → preview card for crawlers, then the app opens the product.
@@ -1019,8 +1044,17 @@ app.get('/p/:id', (req, res) => {
     redirect: `/#/product/${p.id}`,
   });
 });
+app.get('/robots.txt', (req, res) => {
+  const base = PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\nSitemap: ${base}/sitemap.xml\n`);
+});
+app.get('/sitemap.xml', (req, res) => {
+  const base = PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  const urls = [`${base}/`, ...db.prepare('SELECT id, created_at FROM products WHERE active = 1 ORDER BY id').all().map((p) => `${base}/p/${p.id}`)];
+  res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${attr(u)}</loc></url>`).join('\n')}\n</urlset>\n`);
+});
 app.get('/', (req, res) => renderIndex(req, res));
-app.use(express.static(PUBLIC, { index: false }));
+app.use(express.static(PUBLIC, { index: false, maxAge: '1h' }));
 const sendAdmin = (_req, res) => { res.setHeader('X-Robots-Tag', 'noindex'); res.sendFile(path.join(PUBLIC, 'admin', 'index.html')); };
 app.get(ADMIN_PATH, sendAdmin);
 app.get(`${ADMIN_PATH}/*`, (req, res, next) => (ADMIN_PATH === '/admin' && /\.(js|css)$/.test(req.path) ? next() : sendAdmin(req, res)));

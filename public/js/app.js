@@ -254,6 +254,7 @@
   function openCats() { renderCatDrawer(); openPanel($('#catDrawer')); }
 
   document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-back]')) { if (history.length > 1) history.back(); else location.hash = '#/'; return; }
     const t = e.target.closest('[data-close],[data-close-nav],[data-open-cats],[data-open-search],[data-lang],[data-logout],[data-cat-side],[data-q],[data-add]');
     if (!t) return;
     if (t.matches('[data-close]')) { e.preventDefault(); closePanels(); }
@@ -332,7 +333,7 @@
   const gridSkeleton = (n = 8) => `<div class="grid">${Array.from({ length: n }, () => '<div class="skeleton" style="aspect-ratio:3/4"></div>').join('')}</div>`;
 
   // ---------------- views ----------------
-  const pageHead = (title, extra = '') => `<div class="page-head"><div class="container"><h1><button class="back-btn" onclick="history.length>1?history.back():location.hash='#/'">${I.chevR}</button>${title}</h1>${extra}</div></div>`;
+  const pageHead = (title, extra = '') => `<div class="page-head"><div class="container"><h1><button class="back-btn" data-back aria-label="back">${I.chevR}</button>${title}</h1>${extra}</div></div>`;
 
   let sliderTimer; let countdownTimer;
   async function viewHome() {

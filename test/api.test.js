@@ -171,7 +171,7 @@ let stop = () => {};
   // link preview
   await call(`/admin/products/${G.id}`, { method: 'PUT', token: A2, body: { ...G2, price: 999, old_price: 1099, variants: G2.variants.map((v) => ({ ...v, price: v.price_usd })), image: upj.url } });
   const html = await (await fetch(B.replace('/api', '') + `/p/${G.id}`)).text();
-  check('product link has og tags + preview image', html.includes('og:title" content="Galaxy S26') && /og:image" content="http[^"]+-og\.jpg"/.test(html) && html.includes(`location.replace("/#/product/${G.id}")`), html.slice(0, 300));
+  check('product link has og tags + preview image', html.includes('og:title" content="Galaxy S26') && /og:image" content="http[^"]+-og\.jpg"/.test(html) && html.includes(`content="0;url=/#/product/${G.id}"`), html.slice(0, 300));
   const home = await (await fetch(B.replace('/api', '') + '/')).text();
   check('home page has og tags', home.includes('og:site_name'));
 

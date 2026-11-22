@@ -216,7 +216,12 @@ function register(app, admin, h) {
 
   // ================= visitor analytics (no cookies, no third parties) =================
   const ANALYTICS_SALT = crypto.randomBytes(16).toString('hex'); // rotates on restart → visitor ids can't be tracked long-term
+  const trackHits = new Map(); // ip → [count, windowStart]; max 120 page views per IP per 10 minutes
+  setInterval(() => trackHits.clear(), 10 * 60 * 1000).unref();
   app.post('/api/track', wrap((req, res) => {
+    const hit = trackHits.get(req.ip) || 0;
+    if (hit >= 120) return res.json({ ok: true });
+    trackHits.set(req.ip, hit + 1);
     const ua = String(req.headers['user-agent'] || '');
     if (!ua || BOT_RE.test(ua) || (req.user && isStaff(req.user.role))) return res.json({ ok: true });
     const day = new Date().toISOString().slice(0, 10);
