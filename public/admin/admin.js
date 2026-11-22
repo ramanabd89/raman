@@ -9,8 +9,9 @@
   const getTok = () => { try { return JSON.parse(localStorage.getItem('token')); } catch { return null; } };
   let token = getTok();
 
+  const SRC = { tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', snapchat: 'Snapchat', friend: 'صديق', influencer: 'مؤثر', google: 'Google', store: 'من المحل', other: 'غير ذلك', unknown: 'لم يُحدد' };
   const ST = { pending: 'قيد الانتظار', preparing: 'قيد التجهيز', shipping: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
-  const ERR = { usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
+  const ERR = { coupon_exists: 'هذا الكود موجود مسبقاً',  usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
 
   async function api(path, opts = {}) {
     const headers = {};
@@ -70,7 +71,7 @@
   }
 
   // ---------- layout ----------
-  const NAV = [['dashboard', '📊 الرئيسية'], ['orders', '📦 الطلبات'], ['products', '📱 المنتجات'], ['categories', '🗂️ الأقسام'], ['banners', '🖼️ البانرات'], ['users', '👥 الزبائن'], ['settings', '⚙️ الإعدادات'], ['security', '🔒 الأمان والنسخ']];
+  const NAV = [['dashboard', '📊 الرئيسية'], ['orders', '📦 الطلبات'], ['products', '📱 المنتجات'], ['categories', '🗂️ الأقسام'], ['banners', '🖼️ البانرات'], ['coupons', '🏷️ الكوبونات'], ['users', '👥 الزبائن'], ['settings', '⚙️ الإعدادات'], ['security', '🔒 الأمان والنسخ']];
   function layout(active, title, actions = '') {
     document.querySelectorAll('.modal-bg').forEach((m) => m.remove()); // close any open dialog when changing page
     root.innerHTML = `<div class="adm">
@@ -138,6 +139,8 @@
         <div class="card panel"><h3>آخر الطلبات</h3>${ordersTable(s.recent, false)}</div>
         <div>
           <div class="card panel"><h3>⚠️ مخزون قليل</h3>${s.low_stock.length ? `<table class="t">${s.low_stock.map((p) => `<tr><td>${esc(p.name_ku)}</td><td class="num" style="color:${p.stock ? '#D97706' : 'var(--red)'};font-weight:800">${p.stock}</td></tr>`).join('')}</table>` : '<p class="muted">لا يوجد</p>'}</div>
+          <div class="card panel"><h3>📣 من وين يجون الزبائن؟</h3>${s.sources.length ? `<table class="t"><thead><tr><th>المصدر</th><th>طلبات</th><th>مبيعات مُسلّمة</th></tr></thead>${s.sources.map((x) => `<tr><td>${esc(SRC[x.source] || x.source)}</td><td class="num">${x.orders}</td><td class="num">${fmt(x.revenue)}</td></tr>`).join('')}</table>` : '<p class="muted">لا توجد طلبات بعد</p>'}
+            ${s.utm.length ? `<h3 style="margin-top:14px;font-size:15px">روابط الحملات</h3><table class="t">${s.utm.map((x) => `<tr><td class="num">${esc(x.utm)}</td><td class="num">${x.orders}</td></tr>`).join('')}</table>` : ''}</div>
           <div class="card panel"><h3>🔥 الأكثر مبيعاً</h3><table class="t">${s.top.map((p) => `<tr><td>${esc(p.name_ku)}</td><td class="num">${p.sold}</td></tr>`).join('')}</table></div>
         </div>
       </div>`;
@@ -151,7 +154,7 @@
       ${list.map((o) => `<tr>
         <td class="num"><b>${o.id}</b></td>
         <td>${esc(o.customer_name)}<br><a class="num muted" href="tel:${esc(o.phone)}">${esc(o.phone)}</a>
-          <div>${o.high_value ? '<span class="pill" style="background:#FFF4E5;color:#D97706">💰 قيمة عالية — اتصل للتأكيد</span> ' : ''}${o.phone_cancelled ? `<span class="pill" style="background:var(--red-soft);color:var(--red)">⚠️ ${o.phone_cancelled} طلب ملغي سابقاً</span> ` : ''}${o.customer_blocked ? '<span class="pill" style="background:var(--ink);color:#fff">🚫 محظور</span>' : ''}</div></td>
+          <div>${o.high_value ? '<span class="pill" style="background:#FFF4E5;color:#D97706">💰 قيمة عالية — اتصل للتأكيد</span> ' : ''}${o.phone_cancelled ? `<span class="pill" style="background:var(--red-soft);color:var(--red)">⚠️ ${o.phone_cancelled} طلب ملغي سابقاً</span> ` : ''}${o.customer_blocked ? '<span class="pill" style="background:var(--ink);color:#fff">🚫 محظور</span>' : ''}${o.coupon_code ? ` <span class="pill" style="background:#F1ECFE;color:#8B5CF6">🏷️ ${esc(o.coupon_code)}</span>` : ''}${o.source || o.utm ? ` <span class="pill" style="background:#EEF0F4;color:var(--ink-2)">📣 ${esc([SRC[o.source] || o.source, o.utm].filter(Boolean).join(' · '))}</span>` : ''}</div></td>
         <td>${esc(o.city)}</td>
         ${full ? `<td class="order-items">${(o.items || []).map((i) => `${esc(i.name)}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × ${i.qty}`).join('<br>')}</td>` : ''}
         <td class="num"><b>${fmt(o.total)}</b></td>
@@ -182,6 +185,7 @@
         <table class="t" style="margin-top:10px">
           <tr><td>المنتجات</td><td class="num">${fmt(o.subtotal)}</td></tr>
           <tr><td>التوصيل</td><td class="num">${fmt(o.delivery_fee)}</td></tr>
+          ${o.discount ? `<tr><td>كوبون ${esc(o.coupon_code)}</td><td class="num">-${fmt(o.discount)}</td></tr>` : ''}
           ${o.wallet_used ? `<tr><td>من المحفظة</td><td class="num">-${fmt(o.wallet_used)}</td></tr>` : ''}
           <tr><td><b>المطلوب من الزبون</b></td><td class="num"><b>${fmt(o.total)} د.ع</b></td></tr>
         </table>`);
@@ -266,7 +270,7 @@
         <div class="field"><label data-cur-label="السعر">السعر (د.ع) *</label><input class="input num" type="number" min="0" step="any" name="price" value="${p.usd_priced ? (p.price_usd ?? '') : (p.price ?? '')}" required><div class="muted usd-hint" data-hint="price"></div></div>
         <div class="field"><label data-cur-label="السعر القديم (للخصم)">السعر القديم (للخصم)</label><input class="input num" type="number" min="0" step="any" name="old_price" value="${p.usd_priced ? (p.old_price_usd ?? '') : (p.old_price ?? '')}"><div class="muted usd-hint" data-hint="old_price"></div></div>
         <div class="field"><label>المخزون</label><input class="input num" type="number" min="0" name="stock" value="${p.stock ?? 0}"></div>
-        <div class="field"><label>عدد المبيعات (يظهر للزبون)</label><input class="input num" type="number" min="0" name="sold" value="${p.sold ?? 0}"></div>
+        <div class="field"><label>عدد المبيعات</label><div class="input num" style="display:flex;align-items:center;background:#F2F3F6" title="ينحسب تلقائياً من الطلبات">${p.sold ?? 0} <span class="muted" style="margin-inline-start:8px;font-size:13px">(تلقائي من الطلبات)</span></div></div>
         <div class="field full"><label>الأنواع (السعة / اللون) — اختياري. إذا أضفت أنواعاً، السعر والمخزون يؤخذان منها</label>
           <div id="variants"></div><button type="button" class="sm-btn" id="addVar">+ إضافة نوع</button></div>
         ${imgField('image', p.image, 'الصورة الرئيسية')}
@@ -464,6 +468,10 @@
     c.innerHTML = `<form class="card panel" id="sf" style="max-width:820px"><div class="fgrid">
       ${F('store_name', 'اسم المتجر')}
       ${F('support_phone', 'رقم الدعم')}
+      ${F('store_address', '📍 عنوان المحل (يظهر للزبائن — يبني الثقة)', 'text', 'placeholder="أربيل — شارع 60، مقابل..."')}
+      ${F('store_map_url', 'رابط الموقع على خرائط Google')}
+      ${F('exchange_days', 'مدة التبديل بالأيام (0 = لا تظهر)', 'number')}
+      ${F('warranty_text', 'نص الضمان (مثل: ضمان سنة من الوكيل)')}
       ${F('delivery_fee', 'أجور التوصيل الافتراضية (د.ع)', 'number')}
       ${F('free_delivery_over', 'توصيل مجاني للطلبات فوق (د.ع) — 0 للإلغاء', 'number')}
       ${F('referral_reward', 'مكافأة الدعوة (د.ع)', 'number')}
@@ -503,12 +511,62 @@
     };
   }
 
+  // ---------- coupons ----------
+  async function coupons() {
+    const c = layout('coupons', 'الكوبونات وأكواد المؤثرين', '<button class="btn btn-primary" id="addCp">+ كوبون جديد</button>');
+    const load = async () => {
+      const list = await api('/admin/coupons');
+      const origin = location.origin;
+      c.innerHTML = `<div class="card panel" style="background:#FFFBF7;border:2px solid #FBE2D3"><b>💡 فكرة:</b> أعطِ كل مؤثر كوداً باسمه (مثل ALI10) ورابطاً خاصاً
+        <code class="num">${esc(origin)}/?src=ali</code> — وتشوف هنا كم طلب ومبيعات جاب كل واحد، فتدفع للي يبيع فعلاً.</div>
+        <div class="card panel">${list.length ? `<table class="t"><thead><tr><th>الكود</th><th>لمن</th><th>الخصم</th><th>الشروط</th><th>الاستخدام</th><th>طلبات</th><th>مبيعات مُسلّمة</th><th>خصم مُعطى</th><th>الحالة</th><th></th></tr></thead><tbody>
+        ${list.map((x) => `<tr>
+          <td class="num"><b>${esc(x.code)}</b></td><td>${esc(x.owner || '—')}</td>
+          <td class="num">${x.type === 'percent' ? `${x.value}%${x.max_discount ? `<br><span class="muted">حد ${fmt(x.max_discount)}</span>` : ''}` : `${fmt(x.value)} د.ع`}</td>
+          <td class="muted" style="font-size:12px">${x.min_order ? `طلب ≥ ${fmt(x.min_order)}<br>` : ''}${x.once_per_customer ? 'مرة لكل زبون' : 'متكرر'}${x.expires_at ? `<br>ينتهي ${esc(x.expires_at.slice(0, 10))}` : ''}</td>
+          <td class="num">${x.uses}${x.max_uses ? ` / ${x.max_uses}` : ''}</td>
+          <td class="num"><b>${x.orders}</b></td><td class="num"><b>${fmt(x.revenue)}</b></td><td class="num muted">${fmt(x.discount_given)}</td>
+          <td>${x.active ? '<span class="st delivered">فعّال</span>' : '<span class="st cancelled">موقوف</span>'}</td>
+          <td><div class="row-actions"><button class="sm-btn" data-edit="${x.id}">تعديل</button><button class="sm-btn danger" data-del="${x.id}">حذف</button></div></td></tr>`).join('')}
+        </tbody></table>` : '<p class="muted">لا توجد كوبونات بعد</p>'}</div>`;
+      c.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => couponForm(list.find((x) => x.id === Number(b.dataset.edit)), load));
+      c.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!confirm('حذف الكوبون؟ (الطلبات السابقة تبقى)')) return; await api(`/admin/coupons/${b.dataset.del}`, { method: 'DELETE' }); load(); });
+    };
+    $('#addCp').onclick = () => couponForm(null, load);
+    load();
+  }
+  function couponForm(cp, done) {
+    const isNew = !cp; cp = cp || { type: 'percent', value: 10, once_per_customer: 1, active: 1, min_order: 0 };
+    modal(isNew ? 'كوبون جديد' : 'تعديل الكوبون', `<form id="cpf"><div class="fgrid">
+      <div class="field"><label>الكود (حروف إنجليزية وأرقام) *</label><input class="input num" dir="ltr" name="code" value="${esc(cp.code || '')}" required pattern="[A-Za-z0-9_-]{3,30}" style="text-transform:uppercase" placeholder="ALI10"></div>
+      <div class="field"><label>لمن؟ (اسم المؤثر أو الحملة)</label><input class="input" name="owner" value="${esc(cp.owner || '')}" placeholder="علي — تيك توك"></div>
+      <div class="field"><label>نوع الخصم</label><select class="input" name="type"><option value="percent" ${cp.type === 'percent' ? 'selected' : ''}>نسبة %</option><option value="fixed" ${cp.type === 'fixed' ? 'selected' : ''}>مبلغ ثابت (د.ع)</option></select></div>
+      <div class="field"><label>قيمة الخصم *</label><input class="input num" type="number" min="1" name="value" value="${cp.value ?? ''}" required></div>
+      <div class="field"><label>أقصى خصم (د.ع) — للنسبة فقط</label><input class="input num" type="number" min="0" name="max_discount" value="${cp.max_discount ?? ''}" placeholder="بلا حد"></div>
+      <div class="field"><label>أقل مبلغ طلب (د.ع)</label><input class="input num" type="number" min="0" name="min_order" value="${cp.min_order ?? 0}"></div>
+      <div class="field"><label>عدد الاستخدامات الكلي</label><input class="input num" type="number" min="1" name="max_uses" value="${cp.max_uses ?? ''}" placeholder="بلا حد"></div>
+      <div class="field"><label>تاريخ الانتهاء</label><input class="input" type="date" name="expires_at" value="${esc((cp.expires_at || '').slice(0, 10))}"></div>
+    </div><div class="toggles">
+      <label><input type="checkbox" name="once_per_customer" ${cp.once_per_customer ? 'checked' : ''}> مرة واحدة لكل زبون</label>
+      <label><input type="checkbox" name="active" ${cp.active ? 'checked' : ''}> فعّال</label>
+    </div><button class="btn btn-primary btn-block">حفظ</button></form>`, (m, close) => {
+      m.querySelector('#cpf').onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target); const body = Object.fromEntries(fd);
+        body.once_per_customer = fd.has('once_per_customer'); body.active = fd.has('active');
+        if (body.expires_at) body.expires_at = `${body.expires_at}T23:59:59`;
+        try { await api(isNew ? '/admin/coupons' : `/admin/coupons/${cp.id}`, { method: isNew ? 'POST' : 'PUT', body }); toast('تم الحفظ'); close(); done(); }
+        catch (err) { toast(err.message); }
+      };
+    });
+  }
+
   // ---------- security: 2FA, backups, activity log ----------
   async function security() {
     const c = layout('security', 'الأمان والنسخ الاحتياطي');
     const [me, backups, log] = await Promise.all([api('/me'), api('/admin/backups'), api('/admin/log')]);
     const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil(b / 1024)} KB`);
-    const ACTIONS = { usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
+    const ACTIONS = { coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
     c.innerHTML = `
       <div class="card panel" id="tfaPanel"><h3>🔐 التحقق بخطوتين لحسابك</h3>
         ${me.user.totp_enabled ? `<p><span class="st delivered">مفعّل ✓</span> عند الدخول يُطلب رمز من تطبيق Authenticator.</p>
@@ -561,7 +619,7 @@
   }
 
   // ---------- router ----------
-  const ROUTES = { dashboard, orders, products, categories, banners, users, settings, security };
+  const ROUTES = { dashboard, orders, products, categories, banners, coupons, users, settings, security };
   async function render() {
     if (!token) return showLogin();
     const key = (location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]) || 'dashboard';

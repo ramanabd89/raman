@@ -257,18 +257,42 @@
   $('#btnSearch').addEventListener('click', openSearch);
   $('#btnMenu').addEventListener('click', () => { renderMenu(); openPanel($('#menuDrawer')); });
 
+  // ---------------- trust strip & WhatsApp ----------------
+  function trustStrip() {
+    const s = S.settings;
+    const items = [[I.shield, T('trustOriginal')], [I.money, T('trustCod')], [I.truck, T('trustFast')]];
+    if (Number(s.exchange_days) > 0) items.push([I.check, T('trustExchange', { x: s.exchange_days })]);
+    if (s.warranty_text) items.push([I.shield, s.warranty_text]);
+    if (s.store_address) items.push([I.map, s.store_address, safeUrl(s.store_map_url)]);
+    return `<div class="trust">${items.map(([ic, txt, link]) => link
+      ? `<a class="trust-item" href="${esc(link)}" target="_blank" rel="noopener">${ic}<span>${esc(txt)}</span></a>`
+      : `<div class="trust-item">${ic}<span>${esc(txt)}</span></div>`).join('')}</div>`;
+  }
+  S.waContext = '';
+  function renderWhatsApp() {
+    const num = String(S.settings.whatsapp || '').replace(/\D/g, '');
+    let el = $('#waFloat');
+    if (!num || S.hideWa) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('a'); el.id = 'waFloat'; el.className = 'wa-float'; el.target = '_blank'; el.rel = 'noopener'; document.body.appendChild(el); }
+    const msg = S.waContext ? T('waProductMsg', { x: S.waContext }) : T('waGeneralMsg');
+    el.href = `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+    el.innerHTML = `${I.whatsapp}<span>${T('whatsappAsk')}</span>`;
+    el.setAttribute('aria-label', T('whatsappAsk'));
+  }
+
   // ---------------- product card ----------------
   function productCard(p) {
     productCache.set(p.id, p);
     const out = p.stock <= 0;
     const off = p.old_price && p.old_price > p.price ? Math.round((1 - p.price / p.old_price) * 100) : 0;
-    const startTags = []; const endTags = [];
-    if (out) endTags.push(`<span class="tag out">${T('soldOut')}</span>`);
-    else if (off) endTags.push(`<span class="tag off">-${off}%</span>`);
-    if (p.featured) startTags.push(`<span class="tag feat">${I.star}${T('featured')}</span>`);
-    else if (p.trending) startTags.push(`<span class="tag trend">${I.fire}${T('trending')}</span>`);
-    else if (p.sold >= 20) startTags.push(`<span class="tag sold">+${p.sold} ${I.fire}</span>`);
-    if (!out && p.stock <= 3) startTags.push(`<span class="tag low">${T('lowStock')}</span>`);
+    // At most one badge per corner, so the photo stays clean.
+    const endTags = out ? [`<span class="tag out">${T('soldOut')}</span>`] : off ? [`<span class="tag off">-${off}%</span>`] : [];
+    const startTag = out ? null
+      : p.stock <= 3 ? `<span class="tag low">${T('lowStock')}</span>`
+        : p.featured ? `<span class="tag feat">${I.star}${T('featured')}</span>`
+          : p.trending ? `<span class="tag trend">${I.fire}${T('trending')}</span>`
+            : p.sold >= 20 ? `<span class="tag sold">+${p.sold} ${I.fire}</span>` : null;
+    const startTags = startTag ? [startTag] : [];
     return `
       <a class="p-card ${out ? 'soldout' : ''}" href="#/product/${p.id}">
         <div class="img">
@@ -300,6 +324,7 @@
       </div></div></div>
       <div class="container">
         <div id="slider"></div>
+        ${trustStrip()}
         <div id="flash"></div>
         <div class="sort-tabs" id="sortTabs"></div>
         <div id="grid">${gridSkeleton()}</div>
@@ -434,12 +459,15 @@
               <button class="btn btn-primary" id="addBtn">${I.basket}${T('addToCart')}</button>
             </div>
             <button class="btn btn-soft btn-block" id="shareBtn" style="margin-bottom:6px">${I.share}${T('share')}</button>
+            ${trustStrip()}
             ${L(p, 'desc') ? `<div class="pd-desc"><h3>${T('description')}</h3><p>${esc(L(p, 'desc'))}</p></div>` : ''}
           </div>
         </div>
         ${data.related.length ? `<div class="section-title">${T('related')}</div><div class="grid">${data.related.map(productCard).join('')}</div>` : ''}
       </div>`;
     const render = () => {
+      S.waContext = `${L(p, 'name')}${variant ? ` (${variant.label})` : ''} — ${location.origin}/p/${p.id}`;
+      renderWhatsApp();
       const price = variant ? variant.price : p.price;
       const old = variant ? variant.old_price : p.old_price;
       const stock = variant ? variant.stock : p.stock;
@@ -554,6 +582,8 @@
     const zs = zones();
     const sub = cartTotal();
     let useWallet = false;
+    let coupon = null; // { code, discount }
+    let source = null;
     app.innerHTML = `${pageHead(T('checkout'))}
       <div class="container cart-layout">
         <form class="card" id="coForm" style="padding:20px">
@@ -566,12 +596,20 @@
             ${zs.map((z) => `<option value="${esc(z.name)}" ${z.name === def.city ? 'selected' : ''}>${esc(z.name)} — ${Number(z.fee) ? `${fmt(z.fee)} ${T('currency')}` : T('free')}</option>`).join('')}</select></div>
           <div class="field"><label>${T('address')}</label><input class="input" name="address" value="${esc([def.area, def.details].filter(Boolean).join(' - '))}" required></div>
           <div class="field"><label>${T('note')}</label><textarea class="input" name="note"></textarea></div>
+          ${me.stats.orders === 0 ? `<div class="field"><label>${T('heardFrom')} <span style="font-weight:400;color:var(--muted)">(${T('optional')})</span></label>
+            <div class="src-chips">${['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'].map((k) => `<button type="button" class="chip" data-src="${k}">${({ tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', snapchat: 'Snapchat', google: 'Google' })[k] || T(`src_${k}`)}</button>`).join('')}</div></div>` : ''}
           <div class="section-title">${T('payment')}</div>
           <label class="check on"><input type="radio" checked> ${T('cod')}</label>
           ${user.wallet > 0 ? `<label class="check" id="walletChk"><input type="checkbox" name="use_wallet"> ${esc(T('useWallet', { x: `${fmt(user.wallet)} ${T('currency')}` }))}</label>` : ''}
         </form>
         <div class="card summary">
           ${S.cart.map((i) => `<div class="sum-row"><span>${esc(L(i, 'name'))}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × <span class="num">${i.qty}</span></span><span class="num">${fmt(i.price * i.qty)}</span></div>`).join('')}
+          <div class="coupon-row" id="couponBox">
+            <input class="input" id="couponIn" placeholder="${esc(T('coupon'))}" autocomplete="off" style="text-transform:uppercase">
+            <button type="button" class="btn btn-soft" id="couponBtn">${T('apply')}</button>
+          </div>
+          <div id="couponMsg"></div>
+          <div class="sum-row hidden" id="discountRow"><span>${T('discountLbl')} <span class="num" id="couponCode"></span></span><span class="num" style="color:var(--green)" id="discountAmt"></span></div>
           <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('delivery')}</span><span id="coDelivery"></span></div>
           <div class="sum-row hidden" id="walletRow"><span>${T('walletUsed')}</span><span class="num" style="color:var(--green)" id="walletAmt"></span></div>
           <div class="sum-row total"><span>${T('total')}</span><span id="coTotal"></span></div>
@@ -580,15 +618,39 @@
       </div>`;
     const recalc = () => {
       const city = $('#coForm').city.value;
-      const delivery = city ? deliveryFor(city, sub) : 0;
+      const disc = coupon ? coupon.discount : 0;
+      const delivery = city ? deliveryFor(city, sub - disc) : 0;
       $('#coDelivery').innerHTML = !city ? '<span style="color:var(--muted)">—</span>' : delivery ? money(delivery) : `<b style="color:var(--green)">${T('free')}</b>`;
-      const used = useWallet ? Math.min(user.wallet, sub + delivery) : 0;
+      $('#discountRow').classList.toggle('hidden', !disc);
+      $('#discountAmt').textContent = `-${fmt(disc)}`;
+      $('#couponCode').textContent = coupon ? `(${coupon.code})` : '';
+      const used = useWallet ? Math.min(user.wallet, sub - disc + delivery) : 0;
       $('#walletRow').classList.toggle('hidden', !used);
       $('#walletAmt').textContent = `-${fmt(used)}`;
-      $('#coTotal').innerHTML = money(sub + delivery - used);
+      $('#coTotal').innerHTML = money(sub - disc + delivery - used);
     };
     recalc();
     $('#coForm').city.onchange = recalc;
+    app.querySelectorAll('[data-src]').forEach((b) => b.onclick = () => {
+      source = source === b.dataset.src ? null : b.dataset.src;
+      app.querySelectorAll('[data-src]').forEach((x) => x.classList.toggle('active', x.dataset.src === source));
+    });
+    const couponErr = (e) => (e.code === 'coupon_min_order' ? T('err_coupon_min_order', { x: `${fmt(e.data.detail)} ${T('currency')}` }) : errMsg(e));
+    const drawCoupon = () => {
+      $('#couponBox').classList.toggle('hidden', !!coupon);
+      $('#couponMsg').innerHTML = coupon ? `<div class="coupon-ok">${I.check}<span>${T('couponApplied')}: <b class="num">${esc(coupon.code)}</b></span><button type="button" id="couponRm">${T('removeCode')}</button></div>` : '';
+      if (coupon) $('#couponRm').onclick = () => { coupon = null; drawCoupon(); recalc(); };
+    };
+    $('#couponBtn').onclick = async () => {
+      const code = $('#couponIn').value.trim();
+      if (!code) return;
+      try {
+        const r = await api('/coupons/check', { method: 'POST', body: { code, items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } });
+        coupon = { code: r.code, discount: r.discount };
+        drawCoupon(); recalc();
+      } catch (e) { $('#couponMsg').innerHTML = `<div class="err" style="margin:8px 0 0">${esc(couponErr(e))}</div>`; }
+    };
+    $('#couponIn').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#couponBtn').click(); } };
     const wc = $('#walletChk');
     if (wc) wc.querySelector('input').onchange = (e) => { useWallet = e.target.checked; wc.classList.toggle('on', useWallet); recalc(); };
     $('#placeBtn').onclick = async () => {
@@ -600,6 +662,7 @@
         const order = await api('/orders', { method: 'POST', body: {
           items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id || undefined, qty: i.qty })),
           name: fd.get('name'), phone: fd.get('phone'), city: fd.get('city'), address: fd.get('address'), note: fd.get('note'), use_wallet: useWallet,
+          coupon: coupon ? coupon.code : undefined, source: source || undefined, utm: campaignSource() || undefined,
         } });
         if (!addresses.length) api('/me/addresses', { method: 'POST', body: { city: fd.get('city'), details: fd.get('address') } }).catch(() => {});
         S.cart = []; saveCart();
@@ -609,7 +672,8 @@
           <a class="btn btn-primary" href="#/order/${order.id}">${T('myOrders')}</a></div>`;
       } catch (e) {
         btn.disabled = false;
-        $('#coErr').innerHTML = `<div class="err">${esc(errMsg(e))}</div>`;
+        if (e.code && e.code.startsWith('coupon_')) { coupon = null; drawCoupon(); recalc(); }
+        $('#coErr').innerHTML = `<div class="err">${esc(e.code && e.code.startsWith('coupon_') ? couponErr(e) : errMsg(e))}</div>`;
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     };
@@ -801,7 +865,8 @@
           <a class="card stat" href="#/orders"><span class="mi o">${I.box}</span><div><div class="lbl">${T('myOrders')}</div><div class="val num">${st.orders}</div></div></a>
           <div class="card stat"><span class="mi g">${I.money}</span><div><div class="lbl">${T('totalSpent')}</div><div class="val">${money(st.total_spent)}</div></div></div>
         </div>
-        <div class="wallet"><span class="mi">${I.wallet}</span><div><div class="lbl">${T('walletBalance')}</div><div class="val">${money(u.wallet)}</div></div></div>
+        ${u.wallet > 0 ? `<div class="wallet"><span class="mi">${I.wallet}</span><div><div class="lbl">${T('walletBalance')}</div><div class="val">${money(u.wallet)}</div></div></div>`
+          : `<a class="wallet" href="#invite" id="inviteNudge" style="background:var(--grad)"><span class="mi" style="color:#fff">${I.gift}</span><div><div class="val" style="font-size:18px">${esc(T('inviteHint', { x: reward }))}</div></div></a>`}
         <div class="invite" id="invite">
           <div class="top"><span class="mi">${I.gift}</span><div><h4>${T('inviteTitle')}</h4><p>${esc(T('inviteSub', { x: reward }))}</p>
             <p style="margin-top:6px"><b class="num">${st.invited}</b> ${T('invited')}</p></div></div>
@@ -824,7 +889,7 @@
         <button class="btn btn-danger btn-block" data-logout>${I.logout}${T('logout')}</button>
       </div>`;
     $('#copyCode').onclick = () => { navigator.clipboard?.writeText(u.referral_code).then(() => toast(T('copied'))).catch(() => {}); };
-    app.querySelector('a[href="#invite"]').onclick = (e) => { e.preventDefault(); $('#invite').scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+    app.querySelectorAll('a[href="#invite"]').forEach((a) => a.onclick = (e) => { e.preventDefault(); $('#invite').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   }
 
   async function viewOrders(status) {
@@ -868,6 +933,7 @@
           <div class="sum-row"><span>${T('address')}</span><b>${esc(o.address)}</b></div>
           ${o.note ? `<div class="sum-row"><span>${T('note')}</span><b>${esc(o.note)}</b></div>` : ''}
           <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('subtotal')}</span>${money(o.subtotal)}</div>
+          ${o.discount ? `<div class="sum-row"><span>${T('discountLbl')} <span class="num">(${esc(o.coupon_code || '')})</span></span><b class="num" style="color:var(--green)">-${fmt(o.discount)}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${o.delivery_fee ? money(o.delivery_fee) : `<b style="color:var(--green)">${T('free')}</b>`}</div>
           ${o.wallet_used ? `<div class="sum-row"><span>${T('walletUsed')}</span><b class="num" style="color:var(--green)">-${fmt(o.wallet_used)}</b></div>` : ''}
           <div class="sum-row total"><span>${T('total')}</span>${money(o.total)}</div>
@@ -955,6 +1021,10 @@
   // ---------------- router ----------------
   function route() {
     app.onclick = null;
+    S.waContext = '';
+    // No floating button where the customer is finishing a purchase — it would cover the main button.
+    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset'].includes(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]);
+    renderWhatsApp();
     closePanels();
     const [pathPart, query] = location.hash.replace(/^#/, '').split('?');
     const parts = pathPart.split('/').filter(Boolean);
@@ -984,7 +1054,15 @@
     }
   }
 
+  function captureSource() {
+    const qs = new URLSearchParams(location.search || (location.hash.split('?')[1] || ''));
+    const src = [qs.get('utm_source') || qs.get('src'), qs.get('utm_campaign')].filter(Boolean).join('_').replace(/[^\w\-.]/g, '').slice(0, 60);
+    if (src) store.set('src', { v: src, t: Date.now() });
+  }
+  const campaignSource = () => { const s = store.get('src', null); return s && Date.now() - s.t < 30 * 864e5 ? s.v : ''; };
+
   async function init() {
+    captureSource();
     $('#year').textContent = new Date().getFullYear();
     applyLang();
     const [settings, cats] = await Promise.all([api('/settings').catch(() => ({})), api('/categories').catch(() => [])]);
@@ -993,7 +1071,13 @@
     document.title = name;
     $('#storeName').textContent = name;
     document.querySelectorAll('.js-store-name').forEach((e) => { e.textContent = name; });
+    if (settings.store_address) {
+      const f = document.createElement('div'); f.className = 'footer-addr';
+      f.innerHTML = `${I.map}${safeUrl(settings.store_map_url) ? `<a href="${esc(settings.store_map_url)}" target="_blank" rel="noopener">${esc(settings.store_address)}</a>` : esc(settings.store_address)}`;
+      document.querySelector('.footer .container').insertBefore(f, document.querySelector('.footer .container').lastElementChild);
+    }
     renderMenu();
+    renderWhatsApp();
     window.addEventListener('hashchange', route);
     route();
   }

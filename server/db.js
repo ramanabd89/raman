@@ -131,6 +131,11 @@ addColumn('orders', 'admin_note', 'TEXT');
 addColumn('products', 'usd_priced', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('products', 'price_usd', 'REAL');
 addColumn('products', 'old_price_usd', 'REAL');
+addColumn('products', 'search_text', 'TEXT');
+addColumn('orders', 'source', 'TEXT');
+addColumn('orders', 'utm', 'TEXT');
+addColumn('orders', 'coupon_code', 'TEXT');
+addColumn('orders', 'discount', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE TABLE IF NOT EXISTS product_variants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,6 +157,21 @@ CREATE TABLE IF NOT EXISTS login_tickets (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   attempts INTEGER NOT NULL DEFAULT 0,
   expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coupons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  owner TEXT,
+  type TEXT NOT NULL DEFAULT 'percent',
+  value INTEGER NOT NULL,
+  max_discount INTEGER,
+  min_order INTEGER NOT NULL DEFAULT 0,
+  max_uses INTEGER,
+  uses INTEGER NOT NULL DEFAULT 0,
+  once_per_customer INTEGER NOT NULL DEFAULT 1,
+  expires_at TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS admin_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,7 +333,7 @@ function bannerSvg(c1, c2, kind) {
 }
 
 seed();
-for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250' })) {
+for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '' })) {
   if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(k) == null) setSetting(k, v);
 }
 // Delivery zones: [{ name, fee }]. Built once from the old comma-separated "cities" list.

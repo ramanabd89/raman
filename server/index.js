@@ -9,6 +9,7 @@ const { notify, orderMessage, escHtml, enabled: telegramEnabled } = require('./n
 const { startBackups, snapshot, listBackups, DIR: BACKUP_DIR } = require('./backup');
 const { newSecret, verifyTotp, otpauthUrl } = require('./totp');
 const { processUpload, ogImageFor } = require('./images');
+const { normalize, searchClause } = require('./search');
 
 const app = express();
 app.disable('x-powered-by');
@@ -22,8 +23,9 @@ app.use((req, res, next) => {
 
 // ---------------- utils ----------------
 const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancelled'];
+const ORDER_SOURCES = ['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
-  'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones'];
+  'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text'];
 const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_rate', 'usd_round'];
 const SESSION_DAYS = { customer: 30, admin: 7 };
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
@@ -92,6 +94,16 @@ function repriceUsd() {
   }
   return products.length;
 }
+
+// ---- search index: normalised names + brand + category names (see server/search.js) ----
+function indexProduct(id) {
+  const p = db.prepare(`SELECT p.name_ku, p.name_ar, p.name_en, p.brand, c.name_ku ck, c.name_ar ca, c.name_en ce, pc.name_ku pk, pc.name_ar pa, pc.name_en pe
+    FROM products p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN categories pc ON pc.id = c.parent_id WHERE p.id = ?`).get(id);
+  if (!p) return;
+  const labels = db.prepare('SELECT label FROM product_variants WHERE product_id = ?').all(id).map((v) => v.label);
+  db.prepare('UPDATE products SET search_text = ? WHERE id = ?').run(` ${normalize([...Object.values(p), ...labels].filter(Boolean).join(' '))} `, id);
+}
+function rebuildSearchIndex() { for (const { id } of db.prepare('SELECT id FROM products').all()) indexProduct(id); }
 
 const VARIANT_COUNT_SQL = '(SELECT COUNT(*) FROM product_variants v WHERE v.product_id = p.id) AS variant_count';
 
@@ -277,9 +289,8 @@ function productQuery(q, { admin = false } = {}) {
     params.push(cid, cid);
   }
   if (q.q) {
-    const like = `%${str(q.q, 100)}%`;
-    where.push('(p.name_ku LIKE ? OR p.name_ar LIKE ? OR p.name_en LIKE ? OR p.brand LIKE ?)');
-    params.push(like, like, like, like);
+    const c = searchClause(str(q.q, 100));
+    if (c) { where.push(`(${c.sql})`); params.push(...c.params); }
   }
   if (q.flash) where.push('p.flash_sale = 1');
   if (q.featured) where.push('p.featured = 1');
@@ -386,18 +397,44 @@ function orderWithItems(o) {
   return { ...o, items: db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id) };
 }
 
+// ---- coupons (influencer / campaign codes) ----
+const normCode = (c) => str(c, 30).toUpperCase().replace(/\s+/g, '');
+function evaluateCoupon(code, userId, subtotal) {
+  const c = db.prepare('SELECT * FROM coupons WHERE code = ?').get(normCode(code));
+  if (!c || !c.active) throw new HttpError(400, 'coupon_invalid');
+  if (c.expires_at && new Date(c.expires_at).getTime() < Date.now()) throw new HttpError(400, 'coupon_expired');
+  if (c.max_uses && c.uses >= c.max_uses) throw new HttpError(400, 'coupon_used_up');
+  if (subtotal < c.min_order) throw Object.assign(new HttpError(400, 'coupon_min_order'), { detail: c.min_order });
+  if (c.once_per_customer && userId && db.prepare("SELECT 1 FROM orders WHERE user_id = ? AND coupon_code = ? AND status != 'cancelled'").get(userId, c.code)) {
+    throw new HttpError(400, 'coupon_already_used');
+  }
+  let discount = c.type === 'fixed' ? c.value : Math.floor((subtotal * c.value) / 100);
+  if (c.max_discount) discount = Math.min(discount, c.max_discount);
+  return { coupon: c, discount: Math.max(0, Math.min(discount, subtotal)) };
+}
+function priceItems(rawItems) {
+  return (Array.isArray(rawItems) ? rawItems.slice(0, 50) : []).map((it) => {
+    const qty = Math.max(1, Math.min(int(it.qty, 1), 99));
+    const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(int(it.id));
+    if (!p) return { id: int(it.id), variant_id: it.variant_id || null, qty, available: false };
+    const v = it.variant_id ? db.prepare('SELECT * FROM product_variants WHERE id = ? AND product_id = ?').get(int(it.variant_id), p.id) : null;
+    if (it.variant_id && !v) return { id: p.id, variant_id: it.variant_id, qty, available: false };
+    return { id: p.id, variant_id: v ? v.id : null, variant_label: v ? v.label : null, name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en,
+      image: p.image, price: v ? v.price : p.price, stock: v ? v.stock : p.stock, qty, available: true };
+  });
+}
+app.post('/api/coupons/check', wrap((req, res) => {
+  const items = priceItems(req.body.items);
+  const subtotal = items.reduce((a, it) => a + (it.available ? it.price * it.qty : 0), 0);
+  const { coupon, discount } = evaluateCoupon(req.body.code, req.user && req.user.id, subtotal);
+  res.json({ code: coupon.code, type: coupon.type, value: coupon.value, discount });
+}));
+
 // Current prices / stock for the cart, plus delivery for a city — so the cart never shows stale prices.
 app.post('/api/cart/quote', wrap((req, res) => {
   const s = getSettings();
-  const items = (Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : []).map((it) => {
-    const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(int(it.id));
-    if (!p) return { id: int(it.id), variant_id: it.variant_id || null, available: false };
-    const v = it.variant_id ? db.prepare('SELECT * FROM product_variants WHERE id = ? AND product_id = ?').get(int(it.variant_id), p.id) : null;
-    if (it.variant_id && !v) return { id: p.id, variant_id: it.variant_id, available: false };
-    return { id: p.id, variant_id: v ? v.id : null, variant_label: v ? v.label : null, name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en,
-      image: p.image, price: v ? v.price : p.price, stock: v ? v.stock : p.stock, available: true };
-  });
-  const subtotal = items.reduce((a, it, i) => a + (it.available ? it.price * Math.max(1, int(req.body.items[i].qty, 1)) : 0), 0);
+  const items = priceItems(req.body.items);
+  const subtotal = items.reduce((a, it) => a + (it.available ? it.price * it.qty : 0), 0);
   let delivery = null;
   try { delivery = deliveryFor(str(req.body.city, 60), subtotal, s); } catch { delivery = null; }
   res.json({ items, subtotal, delivery });
@@ -443,12 +480,20 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
       subtotal += price * qty;
       lines.push({ p, qty, price, variant });
     }
-    const delivery = deliveryFor(city, subtotal, s);
+    let discount = 0; let couponCode = null;
+    if (req.body.coupon) {
+      const c = evaluateCoupon(req.body.coupon, req.user.id, subtotal);
+      discount = c.discount; couponCode = c.coupon.code;
+      db.prepare('UPDATE coupons SET uses = uses + 1 WHERE id = ?').run(c.coupon.id);
+    }
+    const delivery = deliveryFor(city, subtotal - discount, s);
     const user = db.prepare('SELECT wallet FROM users WHERE id = ?').get(req.user.id);
-    const walletUsed = req.body.use_wallet ? Math.min(user.wallet, subtotal + delivery) : 0;
-    const total = subtotal + delivery - walletUsed;
-    const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total)
-      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, name, phone, city, address, str(req.body.note, 500), subtotal, delivery, walletUsed, total).lastInsertRowid);
+    const walletUsed = req.body.use_wallet ? Math.min(user.wallet, subtotal - discount + delivery) : 0;
+    const total = subtotal - discount + delivery - walletUsed;
+    const source = ORDER_SOURCES.includes(req.body.source) ? req.body.source : null;
+    const utm = str(req.body.utm, 100).replace(/[^\w\-.:/ ]/g, '') || null;
+    const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total, discount, coupon_code, source, utm)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, name, phone, city, address, str(req.body.note, 500), subtotal, delivery, walletUsed, total, discount, couponCode, source, utm).lastInsertRowid);
     const insItem = db.prepare('INSERT INTO order_items(order_id, product_id, variant_id, variant_label, name, image, price, qty) VALUES(?,?,?,?,?,?,?,?)');
     for (const { p, qty, price, variant } of lines) {
       insItem.run(oid, p.id, variant ? variant.id : null, variant ? variant.label : null, p.name_ku, p.image, price, qty);
@@ -482,6 +527,7 @@ function cancelOrder(o) {
     if (it.variant_id) db.prepare('UPDATE product_variants SET stock = stock + ? WHERE id = ?').run(it.qty, it.variant_id);
   }
   if (o.wallet_used && o.user_id) db.prepare('UPDATE users SET wallet = wallet + ? WHERE id = ?').run(o.wallet_used, o.user_id);
+  if (o.coupon_code) db.prepare('UPDATE coupons SET uses = MAX(uses - 1, 0) WHERE code = ?').run(o.coupon_code);
 }
 
 app.post('/api/orders/:id/cancel', requireUser, wrap((req, res) => {
@@ -540,6 +586,8 @@ admin.get('/stats', wrap((req, res) => {
     low_stock: db.prepare('SELECT id, name_ku, stock FROM products WHERE stock <= 3 ORDER BY stock LIMIT 10').all(),
     top: db.prepare('SELECT id, name_ku, sold, price FROM products ORDER BY sold DESC LIMIT 5').all(),
     recent: db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 8').all().map(adminOrderExtras),
+    sources: db.prepare("SELECT COALESCE(source, 'unknown') source, COUNT(*) orders, COALESCE(SUM(CASE WHEN status = 'delivered' THEN total + wallet_used END), 0) revenue FROM orders WHERE status != 'cancelled' GROUP BY 1 ORDER BY 2 DESC").all(),
+    utm: db.prepare("SELECT utm, COUNT(*) orders FROM orders WHERE utm IS NOT NULL AND status != 'cancelled' GROUP BY utm ORDER BY 2 DESC LIMIT 10").all(),
     warnings: [
       verifyPassword('admin123', req.user.password_hash) && 'default_password',
       !req.user.totp_enabled && 'no_2fa',
@@ -594,7 +642,7 @@ admin.put('/orders/:id', wrap((req, res) => {
 
 // products
 admin.get('/products', wrap((req, res) => res.json(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true })))));
-const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'sold', 'active', 'usd_priced', 'price_usd', 'old_price_usd'];
+const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd'];
 function productValues(b) {
   const v = {
     category_id: b.category_id ? int(b.category_id) : null,
@@ -605,7 +653,7 @@ function productValues(b) {
     stock: Math.max(0, int(b.stock)), image: str(b.image, 500),
     images: JSON.stringify(Array.isArray(b.images) ? b.images.map((x) => str(x, 500)).filter(Boolean).slice(0, 10) : []),
     featured: b.featured ? 1 : 0, trending: b.trending ? 1 : 0, flash_sale: b.flash_sale ? 1 : 0,
-    sold: Math.max(0, int(b.sold)), active: b.active === false || b.active === 0 ? 0 : 1,
+    active: b.active === false || b.active === 0 ? 0 : 1,
   };
   // USD-priced products: the admin types prices in dollars; IQD prices are calculated from the rate.
   const st = getSettings();
@@ -649,6 +697,7 @@ admin.post('/products', wrap((req, res) => {
     const pid = Number(db.prepare(`INSERT INTO products(${PRODUCT_FIELDS.join(',')}) VALUES(${PRODUCT_FIELDS.map(() => '?').join(',')})`)
       .run(...PRODUCT_FIELDS.map((f) => v[f])).lastInsertRowid);
     saveVariants(pid, v.variants);
+    indexProduct(pid);
     return pid;
   });
   logAdmin(req, 'product_create', { id, name: v.name_ku, price: v.price });
@@ -662,6 +711,7 @@ admin.put('/products/:id', wrap((req, res) => {
   tx(() => {
     db.prepare(`UPDATE products SET ${PRODUCT_FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...PRODUCT_FIELDS.map((f) => v[f]), id);
     saveVariants(id, v.variants);
+    indexProduct(id);
   });
   logAdmin(req, 'product_update', { id, name: v.name_ku, price: [before.price, v.price], stock: [before.stock, v.stock] });
   res.json(adminProduct(id));
@@ -685,6 +735,7 @@ admin.post('/categories', wrap((req, res) => {
   const id = Number(db.prepare('INSERT INTO categories(parent_id, name_ku, name_ar, name_en, image, sort) VALUES(?,?,?,?,?,?)')
     .run(v.parent_id, v.name_ku, v.name_ar, v.name_en, v.image, v.sort).lastInsertRowid);
   logAdmin(req, 'category_create', { id, name: v.name_ku });
+  rebuildSearchIndex();
   res.json(db.prepare('SELECT * FROM categories WHERE id = ?').get(id));
 }));
 admin.put('/categories/:id', wrap((req, res) => {
@@ -693,6 +744,7 @@ admin.put('/categories/:id', wrap((req, res) => {
   if (v.parent_id === id) throw new HttpError(400, 'invalid_input');
   db.prepare('UPDATE categories SET parent_id=?, name_ku=?, name_ar=?, name_en=?, image=?, sort=? WHERE id=?')
     .run(v.parent_id, v.name_ku, v.name_ar, v.name_en, v.image, v.sort, id);
+  rebuildSearchIndex();
   res.json(db.prepare('SELECT * FROM categories WHERE id = ?').get(id));
 }));
 admin.delete('/categories/:id', wrap((req, res) => {
@@ -748,6 +800,47 @@ admin.put('/users/:id', wrap((req, res) => {
   if (blocked !== u.blocked) changes.blocked = [!!u.blocked, !!blocked];
   if (Object.keys(changes).length) logAdmin(req, 'user_update', { id, phone: u.phone, ...changes });
   res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
+}));
+
+// coupons
+admin.get('/coupons', wrap((_req, res) => {
+  res.json(db.prepare(`SELECT c.*,
+      (SELECT COUNT(*) FROM orders o WHERE o.coupon_code = c.code AND o.status != 'cancelled') AS orders,
+      (SELECT COALESCE(SUM(o.total + o.wallet_used), 0) FROM orders o WHERE o.coupon_code = c.code AND o.status = 'delivered') AS revenue,
+      (SELECT COALESCE(SUM(o.discount), 0) FROM orders o WHERE o.coupon_code = c.code AND o.status != 'cancelled') AS discount_given
+    FROM coupons c ORDER BY c.id DESC`).all());
+}));
+function couponValues(b) {
+  const v = {
+    code: normCode(b.code), owner: str(b.owner, 80), type: b.type === 'fixed' ? 'fixed' : 'percent', value: Math.max(0, int(b.value)),
+    max_discount: b.max_discount ? Math.max(0, int(b.max_discount)) : null, min_order: Math.max(0, int(b.min_order)),
+    max_uses: b.max_uses ? Math.max(1, int(b.max_uses)) : null, once_per_customer: b.once_per_customer === false || b.once_per_customer === 0 ? 0 : 1,
+    expires_at: b.expires_at ? str(b.expires_at, 40) : null, active: b.active === false || b.active === 0 ? 0 : 1,
+  };
+  if (!/^[A-Z0-9_-]{3,30}$/.test(v.code) || !v.value || (v.type === 'percent' && v.value > 90)) throw new HttpError(400, 'invalid_input');
+  return v;
+}
+const COUPON_FIELDS = ['code', 'owner', 'type', 'value', 'max_discount', 'min_order', 'max_uses', 'once_per_customer', 'expires_at', 'active'];
+admin.post('/coupons', wrap((req, res) => {
+  const v = couponValues(req.body);
+  if (db.prepare('SELECT 1 FROM coupons WHERE code = ?').get(v.code)) throw new HttpError(409, 'coupon_exists');
+  const id = Number(db.prepare(`INSERT INTO coupons(${COUPON_FIELDS.join(',')}) VALUES(${COUPON_FIELDS.map(() => '?').join(',')})`).run(...COUPON_FIELDS.map((f) => v[f])).lastInsertRowid);
+  logAdmin(req, 'coupon_create', { code: v.code, owner: v.owner, value: v.value, type: v.type });
+  res.json(db.prepare('SELECT * FROM coupons WHERE id = ?').get(id));
+}));
+admin.put('/coupons/:id', wrap((req, res) => {
+  const v = couponValues(req.body);
+  const id = int(req.params.id);
+  if (db.prepare('SELECT 1 FROM coupons WHERE code = ? AND id != ?').get(v.code, id)) throw new HttpError(409, 'coupon_exists');
+  db.prepare(`UPDATE coupons SET ${COUPON_FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...COUPON_FIELDS.map((f) => v[f]), id);
+  logAdmin(req, 'coupon_update', { code: v.code, active: !!v.active });
+  res.json(db.prepare('SELECT * FROM coupons WHERE id = ?').get(id));
+}));
+admin.delete('/coupons/:id', wrap((req, res) => {
+  const c = db.prepare('SELECT code FROM coupons WHERE id = ?').get(int(req.params.id));
+  db.prepare('DELETE FROM coupons WHERE id = ?').run(int(req.params.id));
+  logAdmin(req, 'coupon_delete', { code: c && c.code });
+  res.json({ ok: true });
 }));
 
 // settings
@@ -867,6 +960,7 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
+  rebuildSearchIndex();
   startBackups();
   setInterval(() => {
     db.prepare("DELETE FROM sessions WHERE julianday('now') - julianday(created_at) > 30").run();

@@ -175,6 +175,46 @@ let stop = () => {};
   const home = await (await fetch(B.replace('/api', '') + '/')).text();
   check('home page has og tags', home.includes('og:site_name'));
 
+  // ---------- sales features ----------
+  // multilingual search
+  const findIds = async (q) => (await call(`/products?q=${encodeURIComponent(q)}`)).data.map((x) => x.id);
+  const ip = await findIds('iPhone');
+  check('search: ايفون = iPhone', JSON.stringify(await findIds('ايفون')) === JSON.stringify(ip) && ip.length >= 2, { ip, ar: await findIds('ايفون') });
+  check('search: Kurdish ئایفۆن = iPhone', JSON.stringify(await findIds('ئایفۆن')) === JSON.stringify(ip));
+  check('search: سامسونج finds Samsung products', (await findIds('سامسونج')).length >= 3);
+  check('search: كفر ايفون finds the iPhone case', (await findIds('كفر ايفون')).includes(13));
+  check('search: Arabic digits ١٦ = 16', (await findIds('ايفون ١٦')).includes(1));
+  check('search: باور بانك finds power bank', (await findIds('باور بانك')).includes(15));
+  check('search: nonsense finds nothing', (await findIds('zzqqxx')).length === 0);
+
+  // sold count cannot be faked
+  const before = (await call('/products/14')).data.product.sold;
+  const p14 = (await call('/admin/products', { token: A2 })).data.find((x) => x.id === 14);
+  await call('/admin/products/14', { method: 'PUT', token: A2, body: { ...p14, sold: 99999 } });
+  check('sold count not editable by admin', (await call('/products/14')).data.product.sold === before);
+
+  // coupons
+  r = await call('/admin/coupons', { method: 'POST', token: A2, body: { code: 'ali10', owner: 'Ali (TikTok)', type: 'percent', value: 10, max_discount: 3000, min_order: 20000 } });
+  check('coupon created (code uppercased)', r.data.code === 'ALI10', r.data);
+  r = await call('/coupons/check', { method: 'POST', token: Q, body: { code: 'ALI10', items: [{ id: 14, qty: 1 }] } });
+  check('coupon min order enforced', r.data.error === 'coupon_min_order' && r.data.detail === 20000, r.data);
+  r = await call('/coupons/check', { method: 'POST', token: Q, body: { code: 'ali10', items: [{ id: 6, qty: 2 }] } });
+  check('coupon 10% capped at max discount', r.data.discount === 3000, r.data);
+  r = await call('/coupons/check', { method: 'POST', body: { code: 'NOPE', items: [{ id: 6, qty: 2 }] } });
+  check('unknown coupon rejected', r.data.error === 'coupon_invalid', r.data);
+  // Q has 1 pending order already (Erbil); place a coupon order
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 6, qty: 2 }], city: 'Erbil', address: 'x', coupon: 'ali10', source: 'tiktok', utm: 'tiktok_bio' } });
+  const CO = r.data;
+  check('order applies coupon, keeps source + utm', CO.discount === 3000 && CO.coupon_code === 'ALI10' && CO.total === 50000 - 3000 + 3000 && CO.source === 'tiktok' && CO.utm === 'tiktok_bio', CO);
+  await call(`/admin/orders/${CO.id}`, { method: 'PUT', token: A2, body: { status: 'delivered' } });
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 6, qty: 2 }], city: 'Erbil', address: 'x', coupon: 'ALI10' } });
+  check('coupon once per customer', r.data.error === 'coupon_already_used', r.data);
+  r = await call('/admin/coupons', { token: A2 });
+  const cs = r.data.find((c) => c.code === 'ALI10');
+  check('coupon stats: uses, orders, revenue', cs.uses === 1 && cs.orders === 1 && cs.revenue === 50000 && cs.discount_given === 3000, cs);
+  r = await call('/admin/stats', { token: A2 });
+  check('dashboard shows order sources', r.data.sources.some((x) => x.source === 'tiktok' && x.orders === 1) && r.data.utm.some((x) => x.utm === 'tiktok_bio'), r.data.sources);
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);

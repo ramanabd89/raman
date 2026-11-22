@@ -34,9 +34,11 @@ function orderMessage(order, items, { highValue, publicUrl } = {}) {
     '',
     ...lines,
     '',
+    order.discount ? `🏷️ كوبون ${escHtml(order.coupon_code)}: -${fmt(order.discount)}` : null,
     `🚚 التوصيل: ${fmt(order.delivery_fee)}`,
     order.wallet_used ? `👛 من المحفظة: -${fmt(order.wallet_used)}` : null,
     `💰 <b>المطلوب: ${fmt(order.total)} د.ع</b>`,
+    order.source || order.utm ? `📣 المصدر: ${escHtml([order.source, order.utm].filter(Boolean).join(' · '))}` : null,
     publicUrl ? `\n${escHtml(publicUrl)}/admin/#/orders` : null,
   ].filter((l) => l !== null).join('\n');
 }
