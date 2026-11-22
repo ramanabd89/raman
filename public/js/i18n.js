@@ -52,6 +52,9 @@ window.I18N = {
     heardFrom: 'لە کوێ ئاگادارمان بوویت؟', optional: 'ئارەزوومەندانە', src_friend: 'هاوڕێ', src_influencer: 'ئینفلوێنسەر', src_store: 'لە فرۆشگا', src_other: 'هی تر',
     err_coupon_invalid: 'کۆدەکە دروست نییە', err_coupon_expired: 'کۆدەکە بەسەرچووە', err_coupon_used_up: 'ئەم کۆدە تەواو بووە', err_coupon_min_order: 'کەمترین بڕی داواکاری بۆ ئەم کۆدە {x}ە', err_coupon_already_used: 'پێشتر ئەم کۆدەت بەکارهێناوە',
     inviteHint: 'هاوڕێیەک داوەت بکە و {x} قازانج بکە',
+    specs: 'تایبەتمەندییەکان', boughtTogether: 'زۆرجار پێکەوە دەکڕدرێن', viewCart: 'بینینی سەبەتە', continueShopping: 'بەردەوامبوون لە کڕین', faq: 'پرسیارە باوەکان',
+    maintenanceTitle: 'بەم زووانە دەگەڕێینەوە', maintenanceSub: 'خەریکی نوێکردنەوەی فرۆشگاکەین، تکایە دواتر سەردانمان بکەرەوە.', err_maintenance: 'فرۆشگاکە لە ئێستادا لە نوێکردنەوەدایە',
+    cashbackNote: '{x} دەگەڕێتەوە بۆ جزدانەکەت دوای گەیشتن', deliveryEta: 'ماوەی گەیاندن: {x}', addedTo: 'زیادکرا بۆ سەبەتەکەت',
     shareMsg: 'لە {s} داوای مۆبایل و ئەکسسوار بکە! کۆدی داوەتی من: {c}', bestQuality: 'باشترین کوالێتی و مۆدێل',
   },
   ar: {
@@ -106,6 +109,9 @@ window.I18N = {
     heardFrom: 'من وين سمعت بينا؟', optional: 'اختياري', src_friend: 'صديق', src_influencer: 'مؤثر / بلوگر', src_store: 'من المحل', src_other: 'غير ذلك',
     err_coupon_invalid: 'الكود غير صحيح', err_coupon_expired: 'انتهت صلاحية الكود', err_coupon_used_up: 'انتهى استخدام هذا الكود', err_coupon_min_order: 'الحد الأدنى للطلب لهذا الكود {x}', err_coupon_already_used: 'استخدمت هذا الكود من قبل',
     inviteHint: 'ادعُ صديقاً واربح {x}',
+    specs: 'المواصفات', boughtTogether: 'يشترونها سوية', viewCart: 'عرض السلة', continueShopping: 'متابعة التسوق', faq: 'الأسئلة الشائعة',
+    maintenanceTitle: 'نرجع قريباً', maintenanceSub: 'نقوم بتحديث المتجر، زورونا بعد قليل.', err_maintenance: 'المتجر قيد التحديث حالياً',
+    cashbackNote: '{x} ترجع لمحفظتك بعد الاستلام', deliveryEta: 'مدة التوصيل: {x}', addedTo: 'تمت الإضافة إلى سلتك',
     shareMsg: 'اطلب موبايلات وإكسسوارات من {s}! كود الدعوة: {c}', bestQuality: 'أفضل جودة وأحدث موديلات',
   },
   en: {
@@ -160,6 +166,9 @@ window.I18N = {
     heardFrom: 'How did you hear about us?', optional: 'optional', src_friend: 'A friend', src_influencer: 'Influencer', src_store: 'In our store', src_other: 'Other',
     err_coupon_invalid: 'Invalid code', err_coupon_expired: 'This code has expired', err_coupon_used_up: 'This code has been fully used', err_coupon_min_order: 'Minimum order for this code is {x}', err_coupon_already_used: 'You already used this code',
     inviteHint: 'Invite a friend and earn {x}',
+    specs: 'Specifications', boughtTogether: 'Frequently bought together', viewCart: 'View cart', continueShopping: 'Continue shopping', faq: 'FAQ',
+    maintenanceTitle: 'Back soon', maintenanceSub: 'We are updating the store, please check back shortly.', err_maintenance: 'The store is being updated right now',
+    cashbackNote: '{x} back to your wallet after delivery', deliveryEta: 'Delivery time: {x}', addedTo: 'Added to your cart',
     shareMsg: 'Order phones & accessories from {s}! My invite code: {c}', bestQuality: 'Best quality & latest models',
   },
 };

@@ -44,6 +44,7 @@
     phone: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.3.2 2.5.57 3.6a1 1 0 0 1-.25 1l-2.2 2.2Z"/></svg>',
     wand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3 21 12-12M15 4V2M15 10V8M19 6h2M9 6h2M18 3l1-1M18 9l1 1"/></svg>',
     share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
+    help: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 14.5a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5ZM12 6a3.5 3.5 0 0 0-3.5 3.5h2a1.5 1.5 0 1 1 2.2 1.3c-.9.5-1.7 1.3-1.7 2.7v.5h2v-.4c0-.6.3-.9.9-1.3A3.5 3.5 0 0 0 12 6Z"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
@@ -94,6 +95,7 @@
   function setAuth(token, user) {
     S.token = token; S.user = user;
     if (token) { store.set('token', token); store.set('user', user); } else { store.del('token'); store.del('user'); }
+    if (user && user.role !== 'customer') api('/me').then((me) => { S.adminPath = me.admin_path; renderMenu(); }).catch(() => {});
     renderMenu();
   }
 
@@ -109,7 +111,11 @@
   // ---------------- cart ----------------
   const cartCount = () => S.cart.reduce((a, i) => a + i.qty, 0);
   const cartTotal = () => S.cart.reduce((a, i) => a + i.qty * i.price, 0);
-  function saveCart() { store.set('cart', S.cart); updateCartBadge(); }
+  let syncTimer;
+  function saveCart() {
+    store.set('cart', S.cart); updateCartBadge();
+    if (S.token) { clearTimeout(syncTimer); syncTimer = setTimeout(() => api('/cart/sync', { method: 'POST', body: { items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } }).catch(() => {}), 1500); }
+  }
   function updateCartBadge() {
     const n = cartCount();
     $('#btnCart').innerHTML = I.basket + (n ? `<span class="badge-count num">${n}</span>` : '');
@@ -127,9 +133,22 @@
     else S.cart.push({ id: p.id, variant_id: variant ? variant.id : null, variant_label: variant ? variant.label : null, qty,
       name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en, price: variant ? variant.price : p.price, image: p.image, stock });
     saveCart();
-    toast(T('added'));
+    if (S.bundle && S.bundle.forId === p.id && S.bundle.items.length) showBundleSheet(S.bundle.items);
+    else toast(T('added'));
   }
   const productCache = new Map();
+  function showBundleSheet(items) {
+    let el = $('#bundleSheet');
+    if (!el) { el = document.createElement('div'); el.id = 'bundleSheet'; el.className = 'sheet'; document.body.appendChild(el); }
+    el.innerHTML = `<div class="grab"></div>
+      <div class="sheet-head"><h3><span class="hic" style="background:var(--green-soft);color:var(--green)">${I.check}</span>${T('addedTo')}</h3><button class="close-btn" data-close>${I.close}</button></div>
+      <div class="section-title" style="margin-top:0;font-size:16px">${T('boughtTogether')}</div>
+      <div class="bundle-row">${items.map((b) => { productCache.set(b.id, b); return `<div class="bundle-item"><a href="#/product/${b.id}" data-close-nav><img src="${img(b.image)}" alt=""></a>
+        <div class="nm">${esc(L(b, 'name'))}</div><div class="bp">${money(b.price)}</div><button class="add-btn sm" data-add="${b.id}" aria-label="${esc(T('addToCart'))}">${I.plus}</button></div>`; }).join('')}</div>
+      <a class="btn btn-primary" href="#/cart" data-close-nav>${I.basket}${T('viewCart')}</a>
+      <button class="btn btn-soft" data-close>${T('continueShopping')}</button>`;
+    openPanel(el);
+  }
 
   // ---------------- chrome (header, menu, search, categories) ----------------
   function applyLang() {
@@ -177,7 +196,8 @@
           ${item('#/cart', I.basket, 'g', T('cart'), route === 'cart')}
           ${item('#/orders', I.bag, 'p', T('myOrders'), route === 'orders')}
           ${item('#', I.search, 'y', T('search'), false, 'data-open-search')}
-          ${u && u.role === 'admin' ? item('/admin', I.admin, 'r', T('adminPanel'), false) : ''}
+          ${item('#/faq', I.help, 'b', T('faq'), route === 'faq')}
+          ${u && u.role && u.role !== 'customer' ? item(esc(S.adminPath || '/admin'), I.admin, 'r', T('adminPanel'), false) : ''}
         </div>
         <div class="card lang-box">
           <div class="lbl">${I.globe}${T('language')}</div>
@@ -450,8 +470,10 @@
           </div>
           <div class="card pd-info">
             ${p.brand ? `<div class="brand">${esc(p.brand)}</div>` : ''}
+            ${(p.tags || []).length ? `<div class="ptags">${p.tags.map((t) => `<span class="ptag" style="background:${esc(t.color)}1f;color:${esc(t.color)}">${esc(L(t, 'name'))}</span>`).join('')}</div>` : ''}
             <h1>${esc(L(p, 'name'))}</h1>
             <div class="prices" id="pdPrice"></div>
+            <div class="usd-approx" id="pdUsd"></div>
             ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${variants.map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}</button>`).join('')}</div>` : ''}
             <div class="stock" id="pdStock"></div>
             <div class="pd-actions">
@@ -460,12 +482,22 @@
             </div>
             <button class="btn btn-soft btn-block" id="shareBtn" style="margin-bottom:6px">${I.share}${T('share')}</button>
             ${trustStrip()}
+            <div class="cashback-note hidden" id="pdCashback"></div>
+            ${(p.specs || []).length ? `<div class="pd-desc"><h3>${T('specs')}</h3><table class="specs">${p.specs.map((x) => `<tr><th>${esc(x.k)}</th><td dir="auto">${esc(x.v)}</td></tr>`).join('')}</table></div>` : ''}
             ${L(p, 'desc') ? `<div class="pd-desc"><h3>${T('description')}</h3><p>${esc(L(p, 'desc'))}</p></div>` : ''}
           </div>
         </div>
+        ${(data.bundle || []).length ? `<div class="section-title">${T('boughtTogether')}</div><div class="grid">${data.bundle.map(productCard).join('')}</div>` : ''}
         ${data.related.length ? `<div class="section-title">${T('related')}</div><div class="grid">${data.related.map(productCard).join('')}</div>` : ''}
       </div>`;
+    S.bundle = { forId: p.id, items: data.bundle || [] };
     const render = () => {
+      const curPrice = variant ? variant.price : p.price;
+      const rate = Number(S.settings.usd_rate) || 0;
+      $('#pdUsd').textContent = S.settings.price_display === 'both' && rate ? `≈ $${fmt(Math.round(curPrice / rate))}` : '';
+      const cbPct = Number(S.settings.cashback_percent) || 0;
+      $('#pdCashback').classList.toggle('hidden', !cbPct);
+      if (cbPct) $('#pdCashback').innerHTML = `${I.gift}<span>${esc(T('cashbackNote', { x: `${fmt(Math.floor((curPrice * cbPct) / 100))} ${T('currency')}` }))}</span>`;
       S.waContext = `${L(p, 'name')}${variant ? ` (${variant.label})` : ''} — ${location.origin}/p/${p.id}`;
       renderWhatsApp();
       const price = variant ? variant.price : p.price;
@@ -593,7 +625,7 @@
           <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" value="${esc(user.phone)}" required style="text-align:start"></div>
           <div class="field"><label>${T('city')}</label><select class="input" name="city" required>
             ${zs.length > 1 ? `<option value="" ${def.city ? '' : 'selected'} disabled>${T('chooseCity')}</option>` : ''}
-            ${zs.map((z) => `<option value="${esc(z.name)}" ${z.name === def.city ? 'selected' : ''}>${esc(z.name)} — ${Number(z.fee) ? `${fmt(z.fee)} ${T('currency')}` : T('free')}</option>`).join('')}</select></div>
+            ${zs.map((z) => `<option value="${esc(z.name)}" ${z.name === def.city ? 'selected' : ''}>${esc(z.name)} — ${Number(z.fee) ? `${fmt(z.fee)} ${T('currency')}` : T('free')}${z.eta ? ` · ${esc(z.eta)}` : ''}</option>`).join('')}</select><div class="eta" id="coEta"></div></div>
           <div class="field"><label>${T('address')}</label><input class="input" name="address" value="${esc([def.area, def.details].filter(Boolean).join(' - '))}" required></div>
           <div class="field"><label>${T('note')}</label><textarea class="input" name="note"></textarea></div>
           ${me.stats.orders === 0 ? `<div class="field"><label>${T('heardFrom')} <span style="font-weight:400;color:var(--muted)">(${T('optional')})</span></label>
@@ -619,6 +651,8 @@
     const recalc = () => {
       const city = $('#coForm').city.value;
       const disc = coupon ? coupon.discount : 0;
+      const zone = zs.find((z) => z.name === city);
+      $('#coEta').innerHTML = zone && zone.eta ? `${I.truck}<span>${esc(T('deliveryEta', { x: zone.eta }))}</span>` : '';
       const delivery = city ? deliveryFor(city, sub - disc) : 0;
       $('#coDelivery').innerHTML = !city ? '<span style="color:var(--muted)">—</span>' : delivery ? money(delivery) : `<b style="color:var(--green)">${T('free')}</b>`;
       $('#discountRow').classList.toggle('hidden', !disc);
@@ -884,7 +918,7 @@
           <a class="menu-item" href="#/addresses"><span class="mi o">${I.map}</span>${T('addresses')}<span class="chev">${I.chev}</span></a>
           <a class="menu-item" href="#/edit-profile"><span class="mi g">${I.shield}</span>${T('editProfile')}<span class="chev">${I.chev}</span></a>
           <a class="menu-item" href="#/support"><span class="mi b">${I.headset}</span>${T('support')}<span class="chev">${I.chev}</span></a>
-          ${u.role === 'admin' ? `<a class="menu-item" href="/admin"><span class="mi r">${I.admin}</span>${T('adminPanel')}<span class="chev">${I.chev}</span></a>` : ''}
+          ${u.role !== 'customer' ? `<a class="menu-item" href="${esc(S.adminPath || '/admin')}"><span class="mi r">${I.admin}</span>${T('adminPanel')}<span class="chev">${I.chev}</span></a>` : ''}
         </div>
         <button class="btn btn-danger btn-block" data-logout>${I.logout}${T('logout')}</button>
       </div>`;
@@ -1018,6 +1052,22 @@
     </div>`;
   }
 
+  async function viewFaq() {
+    app.innerHTML = `${pageHead(T('faq'))}<div class="container" style="max-width:760px;padding-top:18px" id="faqList"><div class="spinner"></div></div>`;
+    const list = await api('/faqs').catch(() => []);
+    $('#faqList').innerHTML = list.map((f) => `<details class="card faq"><summary>${esc(L(f, 'q'))}</summary><p>${esc(L(f, 'a'))}</p></details>`).join('')
+      + `<div class="empty" style="padding:24px"><p>${T('whatsappAsk')}</p><a class="btn btn-primary" href="#/support">${I.headset}${T('support')}</a></div>`;
+  }
+  function viewMaintenance() {
+    app.innerHTML = `<div class="empty" style="padding:90px 20px"><div class="ic">${I.clock}</div><h3>${T('maintenanceTitle')}</h3>
+      <p>${esc(S.settings.maintenance_message || T('maintenanceSub'))}</p>
+      ${S.settings.whatsapp ? `<a class="btn btn-primary" style="background:#25D366" target="_blank" rel="noopener" href="https://wa.me/${esc(String(S.settings.whatsapp).replace(/\D/g, ''))}">${I.whatsapp}${T('contactWhatsapp')}</a>` : ''}</div>`;
+  }
+  // Anonymous page-view counter for the admin "visitor analytics" page (no cookies).
+  function track(path, productId) {
+    try { fetch('/api/track', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: `Bearer ${S.token}` } : {}) }, body: JSON.stringify({ path, product_id: productId || undefined, src: campaignSource() || undefined }), keepalive: true }); } catch { /* ignore */ }
+  }
+
   // ---------------- router ----------------
   function route() {
     app.onclick = null;
@@ -1033,6 +1083,9 @@
     document.querySelectorAll('#desktopNav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === (parts[0] || 'home')));
     window.scrollTo(0, 0);
     const [p0, p1] = parts;
+    track(`/${parts.slice(0, p0 === 'product' || p0 === 'category' ? 2 : 1).join('/')}`, p0 === 'product' ? Number(p1) : null);
+    const staff = S.user && S.user.role && S.user.role !== 'customer';
+    if (S.settings.maintenance_mode === '1' && !staff && !['login', 'quick', 'faq'].includes(p0)) return viewMaintenance();
     switch (p0) {
       case undefined: return viewHome();
       case 'category': return viewCategory(Number(p1));
@@ -1050,6 +1103,7 @@
       case 'addresses': return viewAddresses();
       case 'edit-profile': return viewEditProfile();
       case 'support': return viewSupport();
+      case 'faq': return viewFaq();
       default: return viewHome();
     }
   }
@@ -1076,6 +1130,10 @@
       f.innerHTML = `${I.map}${safeUrl(settings.store_map_url) ? `<a href="${esc(settings.store_map_url)}" target="_blank" rel="noopener">${esc(settings.store_address)}</a>` : esc(settings.store_address)}`;
       document.querySelector('.footer .container').insertBefore(f, document.querySelector('.footer .container').lastElementChild);
     }
+    if (settings.slogan) { const sl = document.createElement('div'); sl.className = 'footer-slogan'; sl.textContent = settings.slogan; document.querySelector('.footer .logo').after(sl); }
+    const fl = document.createElement('div'); fl.className = 'footer-links'; fl.innerHTML = `<a href="#/faq">${T('faq')}</a> · <a href="#/support">${T('support')}</a>`;
+    document.querySelector('.footer .container').insertBefore(fl, document.querySelector('.footer .container').lastElementChild);
+    if (S.user && S.user.role !== 'customer') { try { const me = await api('/me'); S.adminPath = me.admin_path; S.user = me.user; } catch { /* signed out */ } }
     renderMenu();
     renderWhatsApp();
     window.addEventListener('hashchange', route);

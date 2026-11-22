@@ -414,3 +414,33 @@ a.trust-item svg { color: var(--brand); }
 .footer-addr { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 6px; }
 .footer-addr svg { width: 16px; height: 16px; color: var(--brand); }
 .footer-addr a { color: var(--brand); font-weight: 700; }
+
+/* product extras */
+.ptags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.ptag { padding: 3px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 800; }
+.usd-approx { color: var(--ink-2); font-weight: 700; font-size: 14px; margin-top: 2px; direction: ltr; text-align: start; unicode-bidi: plaintext; }
+.cashback-note { display: flex; align-items: center; gap: 8px; background: #FFF6E0; color: #B7791F; border-radius: 12px; padding: 10px 12px; font-weight: 700; font-size: 14px; margin-top: 12px; }
+.cashback-note svg { width: 18px; height: 18px; }
+table.specs { width: 100%; border-collapse: collapse; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+table.specs th, table.specs td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: start; font-size: 14px; }
+table.specs th { background: #F7F8FA; color: var(--ink-2); width: 40%; font-weight: 700; }
+table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
+/* bought-together sheet */
+.bundle-row { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; margin-bottom: 16px; }
+.bundle-item { flex: 0 0 132px; background: #F9FAFB; border: 1px solid var(--line); border-radius: 16px; padding: 8px; position: relative; }
+.bundle-item img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; background: #fff; }
+.bundle-item .nm { font-size: 12.5px; font-weight: 700; margin: 6px 2px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bundle-item .bp .price { font-size: 14px; }
+.add-btn.sm { width: 34px; height: 34px; position: absolute; top: 12px; inset-inline-end: 12px; }
+.add-btn.sm svg { width: 18px; height: 18px; }
+.eta { display: flex; align-items: center; gap: 6px; color: var(--green); font-weight: 700; font-size: 13.5px; margin-top: 6px; }
+.eta svg { width: 18px; height: 18px; }
+/* FAQ */
+.faq { padding: 0; margin-bottom: 10px; overflow: hidden; }
+.faq summary { padding: 16px 18px; font-weight: 800; cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+.faq summary::after { content: '+'; color: var(--brand); font-size: 20px; line-height: 1; }
+.faq[open] summary::after { content: '−'; }
+.faq p { margin: 0; padding: 0 18px 16px; color: var(--ink-2); white-space: pre-line; }
+.footer-links { margin: 6px 0; }
+.footer-links a { color: var(--brand); font-weight: 700; }
+.footer-slogan { margin: -4px 0 8px; }
