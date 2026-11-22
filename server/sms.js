@@ -31,7 +31,7 @@ const RESEND_AFTER_MS = 60 * 1000;
 const MAX_PER_PHONE_HOUR = 5;
 const MAX_PER_IP_HOUR = 20;
 const MAX_ATTEMPTS = 5;
-const PURPOSES = ['register', 'reset', 'change_phone'];
+const PURPOSES = ['register', 'reset', 'change_phone', 'quick'];
 // Only send to these country prefixes (protects against SMS-pumping fraud on international numbers).
 const ALLOWED_PREFIXES = (process.env.OTP_ALLOWED_PREFIXES || '+964').split(',').map((x) => x.trim()).filter(Boolean);
 

@@ -27,11 +27,13 @@ async function startServer() {
   return () => { srv.kill(); fs.rmSync(dir, { recursive: true, force: true }); };
 }
 
+let stop = () => {};
 (async () => {
-  const stop = await startServer();
+  stop = await startServer();
   // admin login
   let r = await call('/auth/login', { method: 'POST', body: { phone: '07500000000', password: 'admin123' } });
   const A = r.data.token; check('admin login', !!A, r);
+  await call('/admin/settings', { method: 'PUT', token: A, body: { delivery_zones: JSON.stringify([{ name: 'Erbil', fee: 5000 }]) } });
   r = await call('/admin/stats', { token: A });
   check('stats warnings', ['default_password', 'no_2fa', 'sms_console', 'no_telegram'].every((w) => r.data.warnings.includes(w)), r.data.warnings);
 
@@ -99,9 +101,9 @@ async function startServer() {
 
   // upload: fake image
   const fd = new FormData(); fd.append('file', new Blob(['<html><script>alert(1)</script>'], { type: 'image/png' }), 'x.png');
-  let up = await fetch(B + '/admin/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A2 }, body: fd });
+  var up = await fetch(B + '/admin/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A2 }, body: fd });
   check('fake PNG rejected', up.status === 400);
-  const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
+  const png = await require('sharp')({ create: { width: 4, height: 4, channels: 4, background: '#ff000080' } }).png().toBuffer();
   const fd2 = new FormData(); fd2.append('file', new Blob([png], { type: 'image/png' }), 'y.png');
   up = await fetch(B + '/admin/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A2 }, body: fd2 });
   check('real PNG accepted', up.status === 200);
@@ -119,7 +121,61 @@ async function startServer() {
   r = await call('/admin/backups', { token: U });
   check('customer cannot access backups', r.status === 403);
 
+  // ---------- phase 2 ----------
+  // delivery zones
+  r = await call('/admin/settings', { method: 'PUT', token: A2, body: { delivery_zones: JSON.stringify([{ name: 'Erbil', fee: 3000 }, { name: 'Baghdad', fee: 7000 }]), free_delivery_over: '0' } });
+  check('zones saved and cities synced', r.data.cities === 'Erbil,Baghdad', r.data);
+  r = await call('/cart/quote', { method: 'POST', body: { items: [{ id: 14, qty: 2 }], city: 'Baghdad' } });
+  check('quote uses city fee', r.data.delivery === 7000 && r.data.subtotal === 10000, r.data);
+  r = await call('/auth/otp', { method: 'POST', body: { phone: '07709998877', purpose: 'quick' } });
+  check('quick OTP says new customer', r.data.is_new === true, r.data);
+  let qc = r.data.dev_code;
+  r = await call('/auth/quick', { method: 'POST', body: { phone: '07709998877', code: qc } });
+  check('quick sign-up needs a name', r.data.error === 'name_required', r.data);
+  r = await call('/auth/quick', { method: 'POST', body: { phone: '07709998877', code: qc, name: 'Zana' } });
+  const Q = r.data.token; check('quick sign-up creates account', !!Q && r.data.created === true, r.data);
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 14, qty: 1 }], city: 'Mosul', address: 'x' } });
+  check('unknown city rejected', r.data.error === 'invalid_city', r.data);
+  r = await call('/orders', { method: 'POST', token: Q, body: { items: [{ id: 14, qty: 1 }], city: 'Erbil', address: 'x' } });
+  check('order charged Erbil fee', r.data.delivery_fee === 3000, r.data);
+  r = await call('/auth/otp', { method: 'POST', body: { phone: '07500000000', purpose: 'quick' } });
+  check('admin cannot use passwordless login', r.data.error === 'use_password', r.data);
+
+  // USD pricing
+  r = await call('/admin/products', { method: 'POST', token: A2, body: { name_ku: 'Galaxy S26', usd_priced: true, price: 1000, stock: 5 } });
+  check('USD product needs a rate first', r.data.error === 'usd_rate_missing', r.data);
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { usd_rate: '1480', usd_round: '250' } });
+  r = await call('/admin/products', { method: 'POST', token: A2, body: { name_ku: 'Galaxy S26', usd_priced: true, price: 999, old_price: 1099, stock: 0,
+    variants: [{ label: '256GB', price: 999, stock: 2 }, { label: '512GB', price: 1199, stock: 1 }] } });
+  const G = r.data;
+  check('USD → IQD rounded to 250', G.price === 1478500 && G.variants[1].price === 1774500 && G.variants[0].price_usd === 999, G);
+  r = await call('/admin/products', { method: 'POST', token: A2, body: { name_ku: 'Bad', usd_priced: true, price: 999, old_price: 1500000, stock: 1 } });
+  check('dinar amount in dollar field rejected', r.data.error === 'usd_price_too_high', r.data);
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { usd_rate: '1500' } });
+  r = await call('/admin/products', { token: A2 });
+  const G2 = r.data.find((x) => x.id === G.id);
+  check('rate change reprices product & variants', G2.price === 1498500 && G2.variants[1].price === 1798500, G2);
+
+  // image processing
+  const sharp = require('sharp');
+  const big = await sharp({ create: { width: 3000, height: 2000, channels: 3, background: '#3366ff' } }).jpeg().withMetadata({ exif: { IFD0: { Copyright: 'gps-test' } } }).toBuffer();
+  const fd3 = new FormData(); fd3.append('file', new Blob([big], { type: 'image/jpeg' }), 'big.jpg');
+  up = await fetch(B + '/admin/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A2 }, body: fd3 });
+  const upj = await up.json();
+  check('upload converted to webp', /^\/uploads\/[a-f0-9]+\.webp$/.test(upj.url), upj);
+  const img = Buffer.from(await (await fetch(B.replace('/api', '') + upj.url)).arrayBuffer());
+  const meta = await sharp(img).metadata();
+  check('image resized to ≤1400px and metadata stripped', meta.width === 1400 && !meta.exif, { w: meta.width, exif: !!meta.exif });
+  check('image much smaller than original', img.length < big.length / 3, { before: big.length, after: img.length });
+
+  // link preview
+  await call(`/admin/products/${G.id}`, { method: 'PUT', token: A2, body: { ...G2, price: 999, old_price: 1099, variants: G2.variants.map((v) => ({ ...v, price: v.price_usd })), image: upj.url } });
+  const html = await (await fetch(B.replace('/api', '') + `/p/${G.id}`)).text();
+  check('product link has og tags + preview image', html.includes('og:title" content="Galaxy S26') && /og:image" content="http[^"]+-og\.jpg"/.test(html) && html.includes(`location.replace("/#/product/${G.id}")`), html.slice(0, 300));
+  const home = await (await fetch(B.replace('/api', '') + '/')).text();
+  check('home page has og tags', home.includes('og:site_name'));
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch((e) => { console.error(e); stop(); process.exit(1); });

@@ -45,6 +45,7 @@ window.I18N = {
     err_account_blocked: 'هەژمارەکەت ڕاگیراوە، پەیوەندی بە پشتگیرییەوە بکە', err_too_many_pending: 'داواکارییەکی چاوەڕوانکراوت هەیە، تکایە چاوەڕێ بکە تا دڵنیا دەکرێتەوە',
     err_choose_variant: 'تکایە جۆری بەرهەمەکە هەڵبژێرە', err_phone_not_allowed: 'تەنها ژمارەی عێراقی وەردەگیرێت', err_wrong_2fa_code: 'کۆدەکە هەڵەیە', err_login_expired: 'کاتەکە بەسەرچوو، دووبارە بچۆ ژوورەوە',
     err_product_unavailable: 'بەرهەمێک لە سەبەتەکەت ئێستا بەردەست نییە',
+    quickTitle: 'ژمارەی مۆبایلەکەت بنووسە — کۆدێکت بۆ دەنێرین', continue: 'بەردەوامبوون', loginWithCode: 'چوونە ژوورەوە بە کۆد', loginWithPassword: 'چوونە ژوورەوە بە وشەی نهێنی', share: 'هاوبەشکردن', chooseCity: 'شارەکەت هەڵبژێرە', err_invalid_city: 'تکایە شارێک لە لیستەکە هەڵبژێرە', err_name_required: 'تکایە ناوت بنووسە', err_use_password: 'ئەم هەژمارە پێویستی بە وشەی نهێنییە',
     shareMsg: 'لە {s} داوای مۆبایل و ئەکسسوار بکە! کۆدی داوەتی من: {c}', bestQuality: 'باشترین کوالێتی و مۆدێل',
   },
   ar: {
@@ -92,6 +93,7 @@ window.I18N = {
     err_account_blocked: 'تم إيقاف حسابك، تواصل مع الدعم', err_too_many_pending: 'لديك طلبات قيد الانتظار، يرجى الانتظار حتى يتم تأكيدها',
     err_choose_variant: 'يرجى اختيار نوع المنتج', err_phone_not_allowed: 'نقبل الأرقام العراقية فقط', err_wrong_2fa_code: 'الرمز غير صحيح', err_login_expired: 'انتهت المهلة، سجّل الدخول من جديد',
     err_product_unavailable: 'أحد المنتجات في سلتك لم يعد متوفراً',
+    quickTitle: 'اكتب رقم موبايلك — نرسل لك رمزاً', continue: 'متابعة', loginWithCode: 'الدخول برمز', loginWithPassword: 'الدخول بكلمة المرور', share: 'مشاركة', chooseCity: 'اختر مدينتك', err_invalid_city: 'يرجى اختيار مدينة من القائمة', err_name_required: 'يرجى كتابة اسمك', err_use_password: 'هذا الحساب يحتاج كلمة المرور',
     shareMsg: 'اطلب موبايلات وإكسسوارات من {s}! كود الدعوة: {c}', bestQuality: 'أفضل جودة وأحدث موديلات',
   },
   en: {
@@ -139,6 +141,7 @@ window.I18N = {
     err_account_blocked: 'Your account is suspended, please contact support', err_too_many_pending: 'You already have pending orders, please wait until they are confirmed',
     err_choose_variant: 'Please choose an option', err_phone_not_allowed: 'Only Iraqi phone numbers are accepted', err_wrong_2fa_code: 'Wrong code', err_login_expired: 'Session expired, please log in again',
     err_product_unavailable: 'An item in your cart is no longer available',
+    quickTitle: 'Enter your phone number — we will text you a code', continue: 'Continue', loginWithCode: 'Log in with a code', loginWithPassword: 'Log in with password', share: 'Share', chooseCity: 'Choose your city', err_invalid_city: 'Please choose a city from the list', err_name_required: 'Please enter your name', err_use_password: 'This account needs a password',
     shareMsg: 'Order phones & accessories from {s}! My invite code: {c}', bestQuality: 'Best quality & latest models',
   },
 };

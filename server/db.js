@@ -128,6 +128,9 @@ addColumn('users', 'admin_note', 'TEXT');
 addColumn('order_items', 'variant_id', 'INTEGER');
 addColumn('order_items', 'variant_label', 'TEXT');
 addColumn('orders', 'admin_note', 'TEXT');
+addColumn('products', 'usd_priced', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('products', 'price_usd', 'REAL');
+addColumn('products', 'old_price_usd', 'REAL');
 db.exec(`
 CREATE TABLE IF NOT EXISTS product_variants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,6 +162,9 @@ CREATE TABLE IF NOT EXISTS admin_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+addColumn('product_variants', 'price_usd', 'REAL');
+addColumn('product_variants', 'old_price_usd', 'REAL');
 
 // ---------- helpers ----------
 function hashPassword(password) {
@@ -307,8 +313,14 @@ function bannerSvg(c1, c2, kind) {
 }
 
 seed();
-for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '' })) {
+for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250' })) {
   if (db.prepare('SELECT 1 FROM settings WHERE key = ?').get(k) == null) setSetting(k, v);
+}
+// Delivery zones: [{ name, fee }]. Built once from the old comma-separated "cities" list.
+if (db.prepare("SELECT 1 FROM settings WHERE key = 'delivery_zones'").get() == null) {
+  const st = getSettings();
+  const zones = String(st.cities || '').split(',').map((c) => c.trim()).filter(Boolean).map((name) => ({ name, fee: parseInt(st.delivery_fee || '0', 10) || 0 }));
+  setSetting('delivery_zones', JSON.stringify(zones));
 }
 
 module.exports = { db, tx, hashPassword, verifyPassword, newReferralCode, getSettings, setSetting, UPLOAD_DIR, DATA_DIR };

@@ -69,3 +69,7 @@ select.input.sm { height: 38px; padding: 0 10px; border-radius: 10px; font-size:
 .var-table .input.sm { width: 100%; min-width: 80px; }
 .tfa-steps { padding-inline-start: 20px; line-height: 2; }
 .secret { display: inline-block; background: #F2F3F6; padding: 6px 10px; border-radius: 8px; font-size: 15px; letter-spacing: 1px; }
+
+.usd-toggle { display: flex !important; align-items: center; gap: 8px; padding: 12px 14px; border: 2px dashed #BFE8D4; border-radius: 12px; background: #F3FBF7; cursor: pointer; color: var(--ink) !important; }
+.usd-toggle input { width: 18px; height: 18px; accent-color: var(--green); }
+.usd-hint { font-size: 13px; margin-top: 4px; color: var(--green) !important; font-weight: 700; }

@@ -10,7 +10,7 @@
   let token = getTok();
 
   const ST = { pending: 'قيد الانتظار', preparing: 'قيد التجهيز', shipping: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
-  const ERR = { wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
+  const ERR = { usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
 
   async function api(path, opts = {}) {
     const headers = {};
@@ -205,11 +205,13 @@
 
   // ---------- products ----------
   let catsCache = [];
+  let settingsCache = {};
   const catName = (id) => { const c = catsCache.find((x) => x.id === id); if (!c) return '—'; const p = catsCache.find((x) => x.id === c.parent_id); return p ? `${p.name_ku} › ${c.name_ku}` : c.name_ku; };
   const catOptions = (sel, allowTopOnly = false) => catsCache.filter((c) => !allowTopOnly || !c.parent_id)
     .map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.parent_id ? '— ' + catName(c.id) : c.name_ku)}</option>`).join('');
 
   async function products() {
+    settingsCache = await api('/admin/settings').catch(() => ({}));
     const c = layout('products', 'المنتجات', `<input class="input" id="pq" placeholder="بحث..."><button class="btn btn-primary" id="addP">+ منتج جديد</button>`);
     catsCache = await api('/admin/categories');
     const load = async () => {
@@ -220,7 +222,7 @@
           <td><b>${esc(p.name_ku)}</b><br><span class="muted">${esc(p.name_en || '')}</span>
             <div>${p.featured ? '<span class="pill">مميز</span> ' : ''}${p.flash_sale ? '<span class="pill" style="background:var(--red-soft);color:var(--red)">تخفيض سريع</span> ' : ''}${p.trending ? '<span class="pill" style="background:#EEF0F4;color:var(--ink)">رائج</span>' : ''}</div></td>
           <td>${esc(catName(p.category_id))}</td>
-          <td class="num">${p.has_variants ? '<span class="muted">من </span>' : ''}<b>${fmt(p.price)}</b>${p.old_price ? `<br><s class="muted">${fmt(p.old_price)}</s>` : ''}${p.has_variants ? `<br><span class="muted">${p.variants.length} أنواع</span>` : ''}</td>
+          <td class="num">${p.has_variants ? '<span class="muted">من </span>' : ''}<b>${fmt(p.price)}</b>${p.old_price ? `<br><s class="muted">${fmt(p.old_price)}</s>` : ''}${p.has_variants ? `<br><span class="muted">${p.variants.length} أنواع</span>` : ''}${p.usd_priced ? `<br><span class="pill" style="background:#E6F7EF;color:var(--green)">$${fmt(p.has_variants ? Math.min(...p.variants.map((v) => v.price_usd || Infinity)) : p.price_usd)}</span>` : ''}</td>
           <td class="num" style="font-weight:800;color:${p.stock === 0 ? 'var(--red)' : p.stock <= 3 ? '#D97706' : 'inherit'}">${p.stock}</td>
           <td class="num">${p.sold}</td>
           <td>${p.active ? '<span class="st delivered">ظاهر</span>' : '<span class="st cancelled">مخفي</span>'}</td>
@@ -260,8 +262,9 @@
         ${langFields('name', p, 'اسم المنتج *')}
         <div class="field"><label>القسم</label><select class="input" name="category_id"><option value="">—</option>${catOptions(p.category_id)}</select></div>
         <div class="field"><label>الماركة</label><input class="input" name="brand" value="${esc(p.brand || '')}" placeholder="Apple, Samsung..."></div>
-        <div class="field"><label>السعر (د.ع) *</label><input class="input num" type="number" min="0" name="price" value="${p.price ?? ''}" required></div>
-        <div class="field"><label>السعر القديم (للخصم)</label><input class="input num" type="number" min="0" name="old_price" value="${p.old_price ?? ''}"></div>
+        <div class="field full"><label class="usd-toggle"><input type="checkbox" name="usd_priced" ${p.usd_priced ? 'checked' : ''}> 💵 السعر بالدولار — يتحدث تلقائياً مع سعر الصرف ${Number(settingsCache.usd_rate) ? `(${fmt(settingsCache.usd_rate)} د.ع لكل $)` : '<b style="color:var(--red)">(حدد سعر الصرف من الإعدادات أولاً)</b>'}</label></div>
+        <div class="field"><label data-cur-label="السعر">السعر (د.ع) *</label><input class="input num" type="number" min="0" step="any" name="price" value="${p.usd_priced ? (p.price_usd ?? '') : (p.price ?? '')}" required><div class="muted usd-hint" data-hint="price"></div></div>
+        <div class="field"><label data-cur-label="السعر القديم (للخصم)">السعر القديم (للخصم)</label><input class="input num" type="number" min="0" step="any" name="old_price" value="${p.usd_priced ? (p.old_price_usd ?? '') : (p.old_price ?? '')}"><div class="muted usd-hint" data-hint="old_price"></div></div>
         <div class="field"><label>المخزون</label><input class="input num" type="number" min="0" name="stock" value="${p.stock ?? 0}"></div>
         <div class="field"><label>عدد المبيعات (يظهر للزبون)</label><input class="input num" type="number" min="0" name="sold" value="${p.sold ?? 0}"></div>
         <div class="field full"><label>الأنواع (السعة / اللون) — اختياري. إذا أضفت أنواعاً، السعر والمخزون يؤخذان منها</label>
@@ -278,13 +281,34 @@
       </div>
       <button class="btn btn-primary btn-block">حفظ</button></form>`, (m, close) => {
       bindUploads(m); bindLangTabs(m);
-      let variants = (p.variants || []).map((v) => ({ ...v }));
+      let variants = (p.variants || []).map((v) => (p.usd_priced ? { ...v, price: v.price_usd, old_price: v.old_price_usd } : { ...v }));
+      const isUsd = () => m.querySelector('[name=usd_priced]').checked;
+      const rate = Number(settingsCache.usd_rate) || 0;
+      const step = Math.max(1, Number(settingsCache.usd_round) || 250);
+      const toIqd = (usd) => (Number(usd) ? Math.round((Number(usd) * rate) / step) * step : 0);
+      const refreshCur = () => {
+        const usd = isUsd();
+        m.querySelectorAll('[data-cur-label]').forEach((l) => { l.textContent = `${l.dataset.curLabel} (${usd ? '$' : 'د.ع'})${l.dataset.curLabel === 'السعر' ? ' *' : ''}`; });
+        m.querySelectorAll('[data-hint]').forEach((h) => { const v = m.querySelector(`[name=${h.dataset.hint}]`).value; h.textContent = usd && rate && Number(v) ? `= ${fmt(toIqd(v))} د.ع` : ''; });
+        const th = m.querySelectorAll('.var-table th');
+        if (th.length) { th[1].textContent = `السعر (${usd ? '$' : 'د.ع'})`; th[2].textContent = `السعر القديم (${usd ? '$' : 'د.ع'})`; }
+      };
+      // Switching currency converts the numbers already typed, so a dinar price is never read as dollars.
+      const conv = (v, toUsd) => { const n = Number(v); if (!n) return v; return toUsd ? Math.round((n / rate) * 100) / 100 : toIqd(n); };
+      m.querySelector('[name=usd_priced]').onchange = (e) => {
+        if (e.target.checked && !rate) { e.target.checked = false; return toast(ERR.usd_rate_missing); }
+        const toUsd = e.target.checked;
+        ['price', 'old_price'].forEach((n) => { const el = m.querySelector(`[name=${n}]`); el.value = conv(el.value, toUsd); });
+        variants.forEach((v) => { v.price = conv(v.price, toUsd); v.old_price = conv(v.old_price, toUsd); });
+        drawVars();
+      };
+      ['price', 'old_price'].forEach((n) => m.querySelector(`[name=${n}]`).addEventListener('input', refreshCur));
       const drawVars = () => {
         const box = m.querySelector('#variants');
         box.innerHTML = variants.length ? `<table class="t var-table"><thead><tr><th>النوع (مثل 256GB · أسود)</th><th>السعر</th><th>السعر القديم</th><th>المخزون</th><th></th></tr></thead><tbody>${variants.map((v, i) => `<tr>
           <td><input class="input sm" dir="ltr" data-v="${i}" data-k="label" value="${esc(v.label || '')}"></td>
-          <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="price" value="${v.price ?? ''}"></td>
-          <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="old_price" value="${v.old_price ?? ''}"></td>
+          <td><input class="input sm num" type="number" min="0" step="any" data-v="${i}" data-k="price" value="${v.price ?? ''}"></td>
+          <td><input class="input sm num" type="number" min="0" step="any" data-v="${i}" data-k="old_price" value="${v.old_price ?? ''}"></td>
           <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="stock" value="${v.stock ?? 0}"></td>
           <td><button type="button" class="sm-btn danger" data-rmv="${i}">×</button></td></tr>`).join('')}</tbody></table>` : '';
         box.querySelectorAll('[data-v]').forEach((inp) => inp.oninput = () => { variants[inp.dataset.v][inp.dataset.k] = inp.value; });
@@ -292,6 +316,7 @@
         const hasV = variants.length > 0;
         ['price', 'old_price', 'stock'].forEach((n) => { const el = m.querySelector(`[name=${n}]`); el.disabled = hasV; el.closest('.field').style.opacity = hasV ? .45 : 1; });
         m.querySelector('[name=price]').required = !hasV;
+        refreshCur();
       };
       drawVars();
       m.querySelector('#addVar').onclick = () => { variants.push({ label: '', price: '', old_price: '', stock: 0 }); drawVars(); };
@@ -308,7 +333,7 @@
         e.preventDefault();
         const fd = new FormData(e.target);
         const body = Object.fromEntries(fd);
-        ['active', 'featured', 'trending', 'flash_sale'].forEach((k) => { body[k] = fd.has(k); });
+        ['active', 'featured', 'trending', 'flash_sale', 'usd_priced'].forEach((k) => { body[k] = fd.has(k); });
         body.images = gallery;
         body.variants = variants.filter((v) => String(v.label).trim() && Number(v.price) > 0);
         if (variants.length && !body.variants.length) return toast('أكمل اسم وسعر كل نوع');
@@ -439,24 +464,42 @@
     c.innerHTML = `<form class="card panel" id="sf" style="max-width:820px"><div class="fgrid">
       ${F('store_name', 'اسم المتجر')}
       ${F('support_phone', 'رقم الدعم')}
-      ${F('delivery_fee', 'أجور التوصيل (د.ع)', 'number')}
+      ${F('delivery_fee', 'أجور التوصيل الافتراضية (د.ع)', 'number')}
       ${F('free_delivery_over', 'توصيل مجاني للطلبات فوق (د.ع) — 0 للإلغاء', 'number')}
       ${F('referral_reward', 'مكافأة الدعوة (د.ع)', 'number')}
       ${F('max_pending_orders', 'أقصى عدد طلبات «قيد الانتظار» لكل زبون (0 = بلا حد)', 'number')}
       ${F('confirm_over', 'تنبيه «اتصل للتأكيد» للطلبات فوق (د.ع)', 'number')}
       <div class="field"><label>نهاية التخفيضات السريعة</label><input class="input" type="datetime-local" name="flash_sale_end" value="${toLocal(s.flash_sale_end)}"></div>
-      <div class="field full"><label>المدن (افصل بفاصلة ,)</label><input class="input" name="cities" value="${esc(s.cities || '')}"></div>
+      <div class="field full"><label>🚚 مناطق التوصيل وأجورها</label><div id="zones"></div><button type="button" class="sm-btn" id="addZone">+ إضافة مدينة</button></div>
+      <div class="field"><label>💵 سعر صرف الدولار (دينار لكل 1$) — تغييره يحدّث أسعار المنتجات المسعّرة بالدولار</label><input class="input num" type="number" min="0" name="usd_rate" value="${esc(s.usd_rate || '')}" placeholder="مثلاً 1480"></div>
+      <div class="field"><label>تقريب الأسعار المحوّلة لأقرب (د.ع)</label><select class="input" name="usd_round">${[250, 500, 1000, 5000].map((n) => `<option value="${n}" ${Number(s.usd_round || 250) === n ? 'selected' : ''}>${fmt(n)}</option>`).join('')}</select></div>
       <div class="field full"><label>كلمات البحث الرائجة (افصل بفاصلة ,)</label><input class="input" name="search_tags" value="${esc(s.search_tags || '')}"></div>
       ${F('whatsapp', 'واتساب (رقم دولي بدون +، مثل 9647501234567)')}
       ${F('instagram', 'رابط انستغرام')}
       ${F('facebook', 'رابط فيسبوك')}
       ${F('tiktok', 'رابط تيك توك')}
     </div><button class="btn btn-primary">حفظ الإعدادات</button></form>`;
+    let zones = [];
+    try { zones = JSON.parse(s.delivery_zones || '[]'); } catch { zones = []; }
+    const drawZones = () => {
+      $('#zones').innerHTML = `<table class="t var-table"><thead><tr><th>المدينة</th><th>أجور التوصيل (د.ع)</th><th></th></tr></thead><tbody>${zones.map((z, i) => `<tr>
+        <td><input class="input sm" data-z="${i}" data-k="name" value="${esc(z.name)}"></td>
+        <td><input class="input sm num" type="number" min="0" data-z="${i}" data-k="fee" value="${z.fee ?? 0}"></td>
+        <td><button type="button" class="sm-btn danger" data-rmz="${i}">×</button></td></tr>`).join('')}</tbody></table>`;
+      $('#zones').querySelectorAll('[data-z]').forEach((inp) => inp.oninput = () => { zones[inp.dataset.z][inp.dataset.k] = inp.value; });
+      $('#zones').querySelectorAll('[data-rmz]').forEach((b) => b.onclick = () => { zones.splice(Number(b.dataset.rmz), 1); drawZones(); });
+    };
+    drawZones();
+    $('#addZone').onclick = () => { zones.push({ name: '', fee: Number(s.delivery_fee || 0) }); drawZones(); };
     $('#sf').onsubmit = async (e) => {
       e.preventDefault();
-      const body = Object.fromEntries(new FormData(e.target));
+      const all = Object.fromEntries(new FormData(e.target));
+      const body = Object.fromEntries(Object.entries(all).filter(([k]) => /^[a-z_]+$/.test(k)));
       body.flash_sale_end = body.flash_sale_end ? new Date(body.flash_sale_end).toISOString() : '';
-      try { await api('/admin/settings', { method: 'PUT', body }); toast('تم الحفظ'); } catch (err) { toast(err.message); }
+      body.delivery_zones = JSON.stringify(zones.filter((z) => String(z.name).trim()).map((z) => ({ name: String(z.name).trim(), fee: Number(z.fee) || 0 })));
+      const rateChanged = String(body.usd_rate || '') !== String(s.usd_rate || '') || String(body.usd_round) !== String(s.usd_round || '250');
+      if (rateChanged && body.usd_rate && !confirm(`سيتم تحديث أسعار كل المنتجات المسعّرة بالدولار حسب ${fmt(body.usd_rate)} د.ع. متابعة؟`)) return;
+      try { Object.assign(s, await api('/admin/settings', { method: 'PUT', body })); toast(rateChanged ? 'تم الحفظ وتحديث الأسعار' : 'تم الحفظ'); } catch (err) { toast(err.message); }
     };
   }
 
@@ -465,7 +508,7 @@
     const c = layout('security', 'الأمان والنسخ الاحتياطي');
     const [me, backups, log] = await Promise.all([api('/me'), api('/admin/backups'), api('/admin/log')]);
     const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil(b / 1024)} KB`);
-    const ACTIONS = { order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
+    const ACTIONS = { usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
     c.innerHTML = `
       <div class="card panel" id="tfaPanel"><h3>🔐 التحقق بخطوتين لحسابك</h3>
         ${me.user.totp_enabled ? `<p><span class="st delivered">مفعّل ✓</span> عند الدخول يُطلب رمز من تطبيق Authenticator.</p>

@@ -43,6 +43,7 @@
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
     phone: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.3.2 2.5.57 3.6a1 1 0 0 1-.25 1l-2.2 2.2Z"/></svg>',
     wand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3 21 12-12M15 4V2M15 10V8M19 6h2M9 6h2M18 3l1-1M18 9l1 1"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
@@ -169,7 +170,7 @@
         ${u ? `<a href="#/profile" class="card menu-user"><span class="avatar">${esc((u.name || '?').charAt(0).toUpperCase())}</span>
           <span class="info"><b>${esc(u.name)}</b><span class="num">${esc(u.phone)}</span><br><span class="pill">${T('customer')}</span> <span style="color:var(--brand);font-weight:700">${T('profile')}</span></span>
           <span class="chev" style="width:20px;color:var(--muted)">${I.chev}</span></a>`
-        : `<div class="card menu-user"><span class="avatar">?</span><span class="info"><b>${T('welcome')}</b><a class="pill" href="#/login">${T('login')}</a></span></div>`}
+        : `<div class="card menu-user"><span class="avatar">?</span><span class="info"><b>${T('welcome')}</b><a class="pill" href="#/quick">${T('login')}</a></span></div>`}
         <div class="card menu-list">
           ${item('#/', I.home, `o ${route === '' ? 'solid' : ''}`, T('home'), route === '')}
           ${item('#', I.list, 'b', T('categories'), false, 'data-open-cats')}
@@ -432,6 +433,7 @@
               <div class="qty" id="qtyBox"><button id="qMinus">${I.minus}</button><span id="qVal" class="num">1</span><button id="qPlus">${I.plus}</button></div>
               <button class="btn btn-primary" id="addBtn">${I.basket}${T('addToCart')}</button>
             </div>
+            <button class="btn btn-soft btn-block" id="shareBtn" style="margin-bottom:6px">${I.share}${T('share')}</button>
             ${L(p, 'desc') ? `<div class="pd-desc"><h3>${T('description')}</h3><p>${esc(L(p, 'desc'))}</p></div>` : ''}
           </div>
         </div>
@@ -462,9 +464,43 @@
     $('#qMinus').onclick = () => { qty = Math.max(1, qty - 1); $('#qVal').textContent = qty; };
     $('#qPlus').onclick = () => { qty = Math.min(variant ? variant.stock : p.stock, qty + 1); $('#qVal').textContent = qty; };
     $('#addBtn').onclick = () => addToCart(p, qty, variant);
+    $('#shareBtn').onclick = async () => {
+      const url = `${location.origin}/p/${p.id}`;
+      const text = `${L(p, 'name')} — ${fmt(variant ? variant.price : p.price)} ${T('currency')}`;
+      if (navigator.share) { try { await navigator.share({ title: L(p, 'name'), text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+      window.open(`https://wa.me/?text=${encodeURIComponent(`${text}\n${url}`)}`, '_blank', 'noopener');
+    };
   }
 
-  function viewCart() {
+  // Delivery zones from settings: [{ name, fee }]
+  function zones() {
+    try { const z = JSON.parse(S.settings.delivery_zones || '[]'); if (Array.isArray(z) && z.length) return z; } catch { /* fall back */ }
+    return String(S.settings.cities || '').split(',').map((c) => c.trim()).filter(Boolean).map((name) => ({ name, fee: Number(S.settings.delivery_fee || 0) }));
+  }
+  function deliveryFor(city, sub) {
+    const freeOver = Number(S.settings.free_delivery_over || 0);
+    if (freeOver && sub >= freeOver) return 0;
+    const z = zones().find((x) => x.name === city);
+    return z ? Number(z.fee) : Number(S.settings.delivery_fee || 0);
+  }
+  // Refresh cart prices / stock from the server (prices can change, e.g. when the dollar rate changes).
+  async function refreshCart() {
+    if (!S.cart.length) return;
+    try {
+      const q = await api('/cart/quote', { method: 'POST', body: { items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } });
+      let removed = false;
+      S.cart = S.cart.map((i, idx) => {
+        const it = q.items[idx];
+        if (!it || !it.available || it.stock <= 0) { removed = true; return null; }
+        return { ...i, ...it, qty: Math.min(i.qty, it.stock) };
+      }).filter(Boolean);
+      saveCart();
+      if (removed) toast(T('err_product_unavailable'));
+    } catch { /* offline: keep stored prices */ }
+  }
+
+  async function viewCart(skipRefresh) {
+    if (!skipRefresh && S.cart.length) { app.innerHTML = '<div class="spinner"></div>'; await refreshCart(); }
     const n = cartCount();
     if (!n) {
       app.innerHTML = `${pageHead(T('cartTitle'), `<span class="pill num">${n} ${T('pcs')}</span>`)}
@@ -472,9 +508,10 @@
       return;
     }
     const sub = cartTotal();
-    const fee = Number(S.settings.delivery_fee || 0);
     const freeOver = Number(S.settings.free_delivery_over || 0);
-    const delivery = freeOver && sub >= freeOver ? 0 : fee;
+    const fees = zones().map((z) => Number(z.fee));
+    const minFee = fees.length ? Math.min(...fees) : Number(S.settings.delivery_fee || 0);
+    const isFree = freeOver && sub >= freeOver;
     app.innerHTML = `${pageHead(T('cartTitle'), `<span class="pill">${n} ${T('pcs')}</span>`)}
       <div class="container cart-layout">
         <div>${S.cart.map((i) => `
@@ -489,8 +526,8 @@
         <div class="card summary">
           ${freeOver && sub < freeOver ? `<div class="hint">${esc(T('freeDeliveryHint', { x: `${fmt(freeOver - sub)} ${T('currency')}` }))}<div class="progress"><i style="width:${Math.min(100, (sub / freeOver) * 100)}%"></i></div></div>` : ''}
           <div class="sum-row"><span>${T('subtotal')}</span>${money(sub)}</div>
-          <div class="sum-row"><span>${T('delivery')}</span>${delivery ? money(delivery) : `<b style="color:var(--green)">${T('free')}</b>`}</div>
-          <div class="sum-row total"><span>${T('total')}</span>${money(sub + delivery)}</div>
+          <div class="sum-row"><span>${T('delivery')}</span>${isFree || !minFee ? `<b style="color:var(--green)">${T('free')}</b>` : `<span>${fees.length > 1 && new Set(fees).size > 1 ? `<small style="color:var(--ink-2)">${T('from')}</small> ` : ''}${money(minFee)}</span>`}</div>
+          <div class="sum-row total"><span>${T('total')}</span>${money(sub + (isFree ? 0 : minFee))}</div>
           <a class="btn btn-primary btn-block" href="#/checkout" style="margin-top:12px">${T('checkout')}</a>
         </div>
       </div>`;
@@ -501,21 +538,21 @@
       if (b.dataset.inc) { if (it.qty < (it.stock || 99)) it.qty++; else toast(T('maxStock', { x: it.stock })); }
       if (b.dataset.dec) it.qty = Math.max(1, it.qty - 1);
       if (b.dataset.rm) S.cart = S.cart.filter((x) => cartKey(x) !== key);
-      saveCart(); viewCart();
+      saveCart(); viewCart(true);
     };
   }
 
   async function viewCheckout() {
-    if (!S.user) { location.hash = '#/login?next=checkout'; return; }
+    if (!S.user) { location.hash = '#/quick?next=checkout'; return; }
     if (!cartCount()) { location.hash = '#/cart'; return; }
-    const [me, addresses] = await Promise.all([api('/me').catch(() => null), api('/me/addresses').catch(() => [])]);
-    if (!me) { location.hash = '#/login?next=checkout'; return; }
+    app.innerHTML = '<div class="spinner"></div>';
+    const [me, addresses] = await Promise.all([api('/me').catch(() => null), api('/me/addresses').catch(() => []), refreshCart()]);
+    if (!me) { location.hash = '#/quick?next=checkout'; return; }
+    if (!cartCount()) { location.hash = '#/cart'; return; }
     const user = me.user;
     const def = addresses[0] || {};
-    const cities = String(S.settings.cities || '').split(',').map((c) => c.trim()).filter(Boolean);
+    const zs = zones();
     const sub = cartTotal();
-    const freeOver = Number(S.settings.free_delivery_over || 0);
-    const delivery = freeOver && sub >= freeOver ? 0 : Number(S.settings.delivery_fee || 0);
     let useWallet = false;
     app.innerHTML = `${pageHead(T('checkout'))}
       <div class="container cart-layout">
@@ -524,7 +561,9 @@
           <div id="coErr"></div>
           <div class="field"><label>${T('name')}</label><input class="input" name="name" value="${esc(user.name)}" required></div>
           <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" value="${esc(user.phone)}" required style="text-align:start"></div>
-          <div class="field"><label>${T('city')}</label><select class="input" name="city" required>${cities.map((c) => `<option ${c === def.city ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+          <div class="field"><label>${T('city')}</label><select class="input" name="city" required>
+            ${zs.length > 1 ? `<option value="" ${def.city ? '' : 'selected'} disabled>${T('chooseCity')}</option>` : ''}
+            ${zs.map((z) => `<option value="${esc(z.name)}" ${z.name === def.city ? 'selected' : ''}>${esc(z.name)} — ${Number(z.fee) ? `${fmt(z.fee)} ${T('currency')}` : T('free')}</option>`).join('')}</select></div>
           <div class="field"><label>${T('address')}</label><input class="input" name="address" value="${esc([def.area, def.details].filter(Boolean).join(' - '))}" required></div>
           <div class="field"><label>${T('note')}</label><textarea class="input" name="note"></textarea></div>
           <div class="section-title">${T('payment')}</div>
@@ -533,18 +572,23 @@
         </form>
         <div class="card summary">
           ${S.cart.map((i) => `<div class="sum-row"><span>${esc(L(i, 'name'))}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × <span class="num">${i.qty}</span></span><span class="num">${fmt(i.price * i.qty)}</span></div>`).join('')}
-          <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('delivery')}</span>${delivery ? money(delivery) : `<b style="color:var(--green)">${T('free')}</b>`}</div>
+          <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('delivery')}</span><span id="coDelivery"></span></div>
           <div class="sum-row hidden" id="walletRow"><span>${T('walletUsed')}</span><span class="num" style="color:var(--green)" id="walletAmt"></span></div>
-          <div class="sum-row total"><span>${T('total')}</span><span id="coTotal">${money(sub + delivery)}</span></div>
+          <div class="sum-row total"><span>${T('total')}</span><span id="coTotal"></span></div>
           <button class="btn btn-primary btn-block" id="placeBtn" style="margin-top:12px">${T('placeOrder')}</button>
         </div>
       </div>`;
     const recalc = () => {
+      const city = $('#coForm').city.value;
+      const delivery = city ? deliveryFor(city, sub) : 0;
+      $('#coDelivery').innerHTML = !city ? '<span style="color:var(--muted)">—</span>' : delivery ? money(delivery) : `<b style="color:var(--green)">${T('free')}</b>`;
       const used = useWallet ? Math.min(user.wallet, sub + delivery) : 0;
       $('#walletRow').classList.toggle('hidden', !used);
       $('#walletAmt').textContent = `-${fmt(used)}`;
       $('#coTotal').innerHTML = money(sub + delivery - used);
     };
+    recalc();
+    $('#coForm').city.onchange = recalc;
     const wc = $('#walletChk');
     if (wc) wc.querySelector('input').onchange = (e) => { useWallet = e.target.checked; wc.classList.toggle('on', useWallet); recalc(); };
     $('#placeBtn').onclick = async () => {
@@ -565,9 +609,65 @@
           <a class="btn btn-primary" href="#/order/${order.id}">${T('myOrders')}</a></div>`;
       } catch (e) {
         btn.disabled = false;
-        $('#coErr').innerHTML = `<div class="err">${esc(errMsg(e))}${e.code === 'out_of_stock' ? '' : ''}</div>`;
+        $('#coErr').innerHTML = `<div class="err">${esc(errMsg(e))}</div>`;
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
+    };
+  }
+
+  // Passwordless: phone → code (→ name for new customers). Used at checkout so buying needs no password.
+  function viewQuick(next) {
+    const nextQ = next ? `?next=${encodeURIComponent(next)}` : '';
+    app.innerHTML = `<div class="container"><form class="card form-card" id="qForm">
+      <div class="auth-title"><div class="logo"><span>${esc(S.settings.store_name || '')}</span><span class="dot"></span></div><p>${T('quickTitle')}</p></div>
+      <div id="qErr"></div>
+      <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" required placeholder="07xx xxx xxxx" autocomplete="tel" style="text-align:start"></div>
+      <button class="btn btn-primary btn-block" type="submit">${T('sendCode')}</button>
+      <div class="switch-link"><a href="#/login${nextQ}">${T('loginWithPassword')}</a></div>
+    </form></div>`;
+    $('#qForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const phone = e.target.phone.value;
+      const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
+      try {
+        const sent = await requestCode(phone, 'quick');
+        viewQuickCode(phone, sent, next);
+      } catch (err) {
+        btn.disabled = false;
+        if (err.code === 'use_password') { location.hash = `#/login${nextQ}`; return; }
+        $('#qErr').innerHTML = errHtml(err);
+      }
+    };
+  }
+  function viewQuickCode(phone, sent, next) {
+    app.innerHTML = `<div class="container"><form class="card form-card" id="qcForm">
+      <div class="auth-title"><div class="empty" style="padding:0 0 12px"><div class="ic sq" style="margin-bottom:0">${I.shield}</div></div>
+        <h3 style="margin:0 0 6px">${T('verifyTitle')}</h3><p>${esc(T('codeSentTo', { x: phone }))}</p></div>
+      <div id="qcErr"></div>
+      ${codeInput()}
+      ${sent.is_new ? `<div class="field"><label>${T('name')}</label><input class="input" name="name" required autocomplete="name"></div>
+        <div class="field"><label>${T('referralOpt')}</label><input class="input num" name="referral" style="text-transform:uppercase;text-align:start" value="${esc(store.get('ref', '') || '')}"></div>` : ''}
+      <button class="btn btn-primary btn-block" type="submit">${T('continue')}</button>
+      <button class="btn btn-soft btn-block" type="button" id="resendBtn" style="margin-top:10px"></button>
+      <div class="switch-link"><a href="#" id="changeNum">${T('changeNumber')}</a></div>
+    </form></div>`;
+    const form = $('#qcForm');
+    form.querySelector('[name=code]').focus();
+    startResendCountdown($('#resendBtn'), sent.resend_in || 60);
+    $('#resendBtn').onclick = async () => {
+      try { const r = await requestCode(phone, 'quick'); startResendCountdown($('#resendBtn'), r.resend_in || 60); $('#qcErr').innerHTML = ''; }
+      catch (err) { $('#qcErr').innerHTML = errHtml(err); }
+    };
+    $('#changeNum').onclick = (e) => { e.preventDefault(); viewQuick(next); };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = { phone, ...Object.fromEntries(new FormData(form)) };
+      const btn = form.querySelector('button[type=submit]'); btn.disabled = true;
+      try {
+        const r = await api('/auth/quick', { method: 'POST', body });
+        setAuth(r.token, r.user); store.del('ref');
+        location.hash = next ? `#/${next}` : '#/profile';
+      } catch (err) { btn.disabled = false; $('#qcErr').innerHTML = errHtml(err); }
     };
   }
 
@@ -607,7 +707,7 @@
       <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" required placeholder="07xx xxx xxxx" autocomplete="tel" style="text-align:start"></div>
       ${reset ? '' : `<div class="field"><label>${T('password')}</label><input class="input" name="password" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}"></div>`}
       ${reg ? `<div class="field"><label>${T('referralOpt')}</label><input class="input num" name="referral" style="text-transform:uppercase;text-align:start" value="${esc(store.get('ref', '') || '')}"></div>` : ''}
-      ${mode === 'login' ? `<div style="text-align:end;margin:-4px 0 14px"><a href="#/reset${nextQ}" style="color:var(--brand);font-weight:700;font-size:14px">${T('forgotPassword')}</a></div>` : ''}
+      ${mode === 'login' ? `<div style="display:flex;justify-content:space-between;margin:-4px 0 14px;font-size:14px;font-weight:700"><a href="#/quick${nextQ}" style="color:var(--brand)">${T('loginWithCode')}</a><a href="#/reset${nextQ}" style="color:var(--ink-2)">${T('forgotPassword')}</a></div>` : ''}
       <button class="btn btn-primary btn-block" type="submit">${reg || reset ? T('sendCode') : T('login')}</button>
       <div class="switch-link">${reg ? T('haveAccount') : T('noAccount')} <a href="#/${reg ? 'login' : 'register'}${nextQ}">${reg ? T('login') : T('register')}</a></div>
     </form></div>`;
@@ -681,7 +781,7 @@
   }
 
   async function viewProfile() {
-    if (!S.user) { location.hash = '#/login?next=profile'; return; }
+    if (!S.user) { location.hash = '#/quick?next=profile'; return; }
     app.innerHTML = '<div class="spinner"></div>';
     let me;
     try { me = await api('/me'); } catch { location.hash = '#/login?next=profile'; return; }
@@ -728,7 +828,7 @@
   }
 
   async function viewOrders(status) {
-    if (!S.user) { location.hash = '#/login?next=orders'; return; }
+    if (!S.user) { location.hash = '#/quick?next=orders'; return; }
     const statuses = ['', 'pending', 'preparing', 'shipping', 'delivered', 'cancelled'];
     app.innerHTML = `${pageHead(T('myOrders'))}<div class="container">
       <div class="tabs">${statuses.map((s) => `<a href="#/orders${s ? '/' + s : ''}"><button class="${(status || '') === s ? 'active' : ''}">${s ? T(`st_${s}`) : T('all')}</button></a>`).join('')}</div>
@@ -785,7 +885,7 @@
   async function viewAddresses() {
     if (!S.user) { location.hash = '#/login'; return; }
     const list = await api('/me/addresses').catch(() => []);
-    const cities = String(S.settings.cities || '').split(',').map((c) => c.trim()).filter(Boolean);
+    const cities = zones().map((z) => z.name);
     app.innerHTML = `${pageHead(T('addresses'))}<div class="container" style="max-width:640px;padding-top:18px">
       ${list.length ? list.map((a) => `<div class="card cart-item"><span class="mi o" style="width:48px;height:48px;border-radius:14px;display:grid;place-items:center">${I.map}</span>
         <div class="info"><div class="nm">${esc(a.city)} ${a.is_default ? `<span class="pill">${T('default')}</span>` : ''}</div><div style="color:var(--ink-2)">${esc([a.area, a.details].filter(Boolean).join(' - '))}</div></div>
@@ -873,6 +973,7 @@
       case 'login': return viewLogin('login', qs.get('next'));
       case 'register': return viewLogin('register', qs.get('next'));
       case 'reset': return viewLogin('reset', qs.get('next'));
+      case 'quick': return viewQuick(qs.get('next'));
       case 'profile': return viewProfile();
       case 'orders': return viewOrders(p1);
       case 'order': return viewOrder(Number(p1));

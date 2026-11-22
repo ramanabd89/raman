@@ -8,6 +8,7 @@ const { sendOtp, verifyOtp, OtpError, PROVIDER: SMS_PROVIDER } = require('./sms'
 const { notify, orderMessage, escHtml, enabled: telegramEnabled } = require('./notify');
 const { startBackups, snapshot, listBackups, DIR: BACKUP_DIR } = require('./backup');
 const { newSecret, verifyTotp, otpauthUrl } = require('./totp');
+const { processUpload, ogImageFor } = require('./images');
 
 const app = express();
 app.disable('x-powered-by');
@@ -22,8 +23,8 @@ app.use((req, res, next) => {
 // ---------------- utils ----------------
 const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancelled'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
-  'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone'];
-const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over'];
+  'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones'];
+const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_rate', 'usd_round'];
 const SESSION_DAYS = { customer: 30, admin: 7 };
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
@@ -59,6 +60,39 @@ function syncProductFromVariants(productId) {
   db.prepare('UPDATE products SET price = ?, old_price = ?, stock = ? WHERE id = ?')
     .run(cheapest.price, cheapest.old_price, vs.reduce((a, v) => a + v.stock, 0), productId);
 }
+// ---- delivery zones ----
+function zonesOf(s) {
+  try { const z = JSON.parse(s.delivery_zones || '[]'); return Array.isArray(z) ? z.filter((x) => x && x.name) : []; } catch { return []; }
+}
+function deliveryFor(city, subtotal, s) {
+  const zones = zonesOf(s);
+  const zone = zones.find((z) => z.name === city);
+  if (zones.length && city && !zone) throw new HttpError(400, 'invalid_city');
+  const freeOver = int(s.free_delivery_over, 0);
+  if (freeOver && subtotal >= freeOver) return 0;
+  return zone ? Math.max(0, int(zone.fee)) : int(s.delivery_fee, 0);
+}
+
+// ---- USD-linked prices: IQD price = USD × rate, rounded to usd_round (default 250) ----
+function toIqd(usd, s = getSettings()) {
+  const rate = Number(s.usd_rate) || 0;
+  const step = Math.max(1, int(s.usd_round, 250));
+  return usd ? Math.round((usd * rate) / step) * step : null;
+}
+function repriceUsd() {
+  const s = getSettings();
+  if (!(Number(s.usd_rate) > 0)) return 0;
+  const products = db.prepare('SELECT id, price_usd, old_price_usd FROM products WHERE usd_priced = 1').all();
+  for (const p of products) {
+    db.prepare('UPDATE products SET price = ?, old_price = ? WHERE id = ?').run(toIqd(p.price_usd, s) || 0, toIqd(p.old_price_usd, s), p.id);
+    for (const v of db.prepare('SELECT id, price_usd, old_price_usd FROM product_variants WHERE product_id = ?').all(p.id)) {
+      db.prepare('UPDATE product_variants SET price = ?, old_price = ? WHERE id = ?').run(toIqd(v.price_usd, s) || 0, toIqd(v.old_price_usd, s), v.id);
+    }
+    syncProductFromVariants(p.id);
+  }
+  return products.length;
+}
+
 const VARIANT_COUNT_SQL = '(SELECT COUNT(*) FROM product_variants v WHERE v.product_id = p.id) AS variant_count';
 
 // ---------------- auth ----------------
@@ -95,7 +129,7 @@ function createSession(userId) {
   return token;
 }
 
-// Send a verification code. purpose: register | reset | change_phone
+// Send a verification code. purpose: register | reset | change_phone | quick (passwordless sign-in / sign-up)
 app.post('/api/auth/otp', wrap(async (req, res) => {
   const phone = normPhone(req.body.phone);
   const purpose = String(req.body.purpose || '');
@@ -103,12 +137,41 @@ app.post('/api/auth/otp', wrap(async (req, res) => {
   const exists = !!db.prepare('SELECT 1 FROM users WHERE phone = ?').get(phone);
   if (purpose === 'register' && exists) throw new HttpError(409, 'phone_taken');
   if (purpose === 'reset' && !exists) throw new HttpError(404, 'phone_not_found');
+  if (purpose === 'quick' && exists && db.prepare('SELECT role FROM users WHERE phone = ?').get(phone).role === 'admin') throw new HttpError(403, 'use_password');
   if (purpose === 'change_phone') {
     if (!req.user) throw new HttpError(401, 'unauthorized');
     if (exists) throw new HttpError(409, 'phone_taken');
   }
   const lang = ['ku', 'ar', 'en'].includes(req.body.lang) ? req.body.lang : 'ku';
-  res.json(await sendOtp({ phone, purpose, ip: req.ip, lang, storeName: getSettings().store_name }));
+  const out = await sendOtp({ phone, purpose, ip: req.ip, lang, storeName: getSettings().store_name });
+  if (purpose === 'quick') out.is_new = !exists;
+  res.json(out);
+}));
+
+// Passwordless: phone + code. Logs in an existing customer or creates the account (name required for new ones).
+app.post('/api/auth/quick', wrap((req, res) => {
+  rateLimit(req);
+  const phone = normPhone(req.body.phone);
+  if (phone.length < 7) throw new HttpError(400, 'invalid_input');
+  const existing = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+  if (existing && existing.role === 'admin') throw new HttpError(403, 'use_password'); // admins must use password (+2FA)
+  const name = str(req.body.name, 80);
+  if (!existing && !name) throw new HttpError(400, 'name_required');
+  let referredBy = null;
+  const ref = str(req.body.referral, 20).toUpperCase();
+  if (!existing && ref) {
+    const r = db.prepare('SELECT id FROM users WHERE referral_code = ?').get(ref);
+    if (!r) throw new HttpError(400, 'invalid_referral');
+    referredBy = r.id;
+  }
+  verifyOtp({ phone, purpose: 'quick', code: req.body.code });
+  let user = existing;
+  if (!user) {
+    const id = Number(db.prepare('INSERT INTO users(name, phone, password_hash, referral_code, referred_by) VALUES(?,?,?,?,?)')
+      .run(name, phone, hashPassword(crypto.randomBytes(24).toString('hex')), newReferralCode(), referredBy).lastInsertRowid);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  }
+  res.json({ token: createSession(user.id), user: publicUser(user), created: !existing });
 }));
 
 app.post('/api/auth/reset', wrap((req, res) => {
@@ -323,6 +386,23 @@ function orderWithItems(o) {
   return { ...o, items: db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id) };
 }
 
+// Current prices / stock for the cart, plus delivery for a city — so the cart never shows stale prices.
+app.post('/api/cart/quote', wrap((req, res) => {
+  const s = getSettings();
+  const items = (Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : []).map((it) => {
+    const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(int(it.id));
+    if (!p) return { id: int(it.id), variant_id: it.variant_id || null, available: false };
+    const v = it.variant_id ? db.prepare('SELECT * FROM product_variants WHERE id = ? AND product_id = ?').get(int(it.variant_id), p.id) : null;
+    if (it.variant_id && !v) return { id: p.id, variant_id: it.variant_id, available: false };
+    return { id: p.id, variant_id: v ? v.id : null, variant_label: v ? v.label : null, name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en,
+      image: p.image, price: v ? v.price : p.price, stock: v ? v.stock : p.stock, available: true };
+  });
+  const subtotal = items.reduce((a, it, i) => a + (it.available ? it.price * Math.max(1, int(req.body.items[i].qty, 1)) : 0), 0);
+  let delivery = null;
+  try { delivery = deliveryFor(str(req.body.city, 60), subtotal, s); } catch { delivery = null; }
+  res.json({ items, subtotal, delivery });
+}));
+
 app.post('/api/orders', requireUser, wrap((req, res) => {
   const s = getSettings();
   const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : [];
@@ -363,8 +443,7 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
       subtotal += price * qty;
       lines.push({ p, qty, price, variant });
     }
-    const freeOver = int(s.free_delivery_over, 0);
-    const delivery = freeOver && subtotal >= freeOver ? 0 : int(s.delivery_fee, 0);
+    const delivery = deliveryFor(city, subtotal, s);
     const user = db.prepare('SELECT wallet FROM users WHERE id = ?').get(req.user.id);
     const walletUsed = req.body.use_wallet ? Math.min(user.wallet, subtotal + delivery) : 0;
     const total = subtotal + delivery - walletUsed;
@@ -425,11 +504,11 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: UPLOAD_DIR,
     filename: (_req, file, cb) => {
-      const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' }[file.mimetype] || '.img';
+      const ext = '.upload'; // temporary name; the processed file is saved as .webp
       cb(null, crypto.randomBytes(12).toString('hex') + ext);
     },
   }),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 15 * 1024 * 1024 }, // phone photos are big; they are shrunk after upload
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)),
 });
 // Check the file really is an image (the browser-declared type can be faked).
@@ -444,7 +523,9 @@ function looksLikeImage(file) {
 admin.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'invalid_file' });
   if (!looksLikeImage(req.file.path)) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: 'invalid_file' }); }
-  res.json({ url: `/uploads/${req.file.filename}` });
+  processUpload(req.file.path, UPLOAD_DIR)
+    .then((url) => res.json({ url }))
+    .catch((e) => { console.error('Image processing failed:', e.message); res.status(400).json({ error: 'invalid_file' }); });
 });
 
 admin.get('/stats', wrap((req, res) => {
@@ -513,7 +594,7 @@ admin.put('/orders/:id', wrap((req, res) => {
 
 // products
 admin.get('/products', wrap((req, res) => res.json(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true })))));
-const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'sold', 'active'];
+const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'sold', 'active', 'usd_priced', 'price_usd', 'old_price_usd'];
 function productValues(b) {
   const v = {
     category_id: b.category_id ? int(b.category_id) : null,
@@ -526,10 +607,27 @@ function productValues(b) {
     featured: b.featured ? 1 : 0, trending: b.trending ? 1 : 0, flash_sale: b.flash_sale ? 1 : 0,
     sold: Math.max(0, int(b.sold)), active: b.active === false || b.active === 0 ? 0 : 1,
   };
-  v.variants = (Array.isArray(b.variants) ? b.variants : []).slice(0, 30).map((x, i) => ({
-    id: x.id ? int(x.id) : null, label: str(x.label, 80), price: Math.max(0, int(x.price)),
-    old_price: x.old_price ? Math.max(0, int(x.old_price)) : null, stock: Math.max(0, int(x.stock)), sort: i,
-  })).filter((x) => x.label && x.price);
+  // USD-priced products: the admin types prices in dollars; IQD prices are calculated from the rate.
+  const st = getSettings();
+  const num = (x) => Math.max(0, Math.round((Number(x) || 0) * 100) / 100);
+  v.usd_priced = b.usd_priced ? 1 : 0;
+  if (v.usd_priced && !(Number(st.usd_rate) > 0)) throw new HttpError(400, 'usd_rate_missing');
+  if (v.usd_priced) {
+    v.price_usd = num(b.price) || null; v.old_price_usd = num(b.old_price) || null;
+    v.price = toIqd(v.price_usd, st) || 0; v.old_price = toIqd(v.old_price_usd, st);
+  } else { v.price_usd = null; v.old_price_usd = null; }
+  v.variants = (Array.isArray(b.variants) ? b.variants : []).slice(0, 30).map((x, i) => {
+    const pu = v.usd_priced ? num(x.price) || null : null;
+    const opu = v.usd_priced ? num(x.old_price) || null : null;
+    return {
+      id: x.id ? int(x.id) : null, label: str(x.label, 80),
+      price: v.usd_priced ? toIqd(pu, st) || 0 : Math.max(0, int(x.price)),
+      old_price: v.usd_priced ? toIqd(opu, st) : (x.old_price ? Math.max(0, int(x.old_price)) : null),
+      price_usd: pu, old_price_usd: opu, stock: Math.max(0, int(x.stock)), sort: i,
+    };
+  }).filter((x) => x.label && x.price);
+  // Guard against a dinar amount typed into a dollar field (e.g. 1,500,000 "$").
+  if (v.usd_priced && [v.price_usd, v.old_price_usd, ...v.variants.flatMap((x) => [x.price_usd, x.old_price_usd])].some((x) => x > 50000)) throw new HttpError(400, 'usd_price_too_high');
   if (v.variants.length) { v.price = Math.min(...v.variants.map((x) => x.price)); v.stock = v.variants.reduce((a, x) => a + x.stock, 0); }
   if (!v.name_ku || !v.price) throw new HttpError(400, 'invalid_input');
   return v;
@@ -539,8 +637,8 @@ function saveVariants(productId, variants) {
   db.prepare(`DELETE FROM product_variants WHERE product_id = ? ${keep.length ? `AND id NOT IN (${keep.map(() => '?').join(',')})` : ''}`).run(productId, ...keep);
   for (const x of variants) {
     const exists = x.id && db.prepare('SELECT 1 FROM product_variants WHERE id = ? AND product_id = ?').get(x.id, productId);
-    if (exists) db.prepare('UPDATE product_variants SET label=?, price=?, old_price=?, stock=?, sort=? WHERE id=?').run(x.label, x.price, x.old_price, x.stock, x.sort, x.id);
-    else db.prepare('INSERT INTO product_variants(product_id, label, price, old_price, stock, sort) VALUES(?,?,?,?,?,?)').run(productId, x.label, x.price, x.old_price, x.stock, x.sort);
+    if (exists) db.prepare('UPDATE product_variants SET label=?, price=?, old_price=?, price_usd=?, old_price_usd=?, stock=?, sort=? WHERE id=?').run(x.label, x.price, x.old_price, x.price_usd, x.old_price_usd, x.stock, x.sort, x.id);
+    else db.prepare('INSERT INTO product_variants(product_id, label, price, old_price, price_usd, old_price_usd, stock, sort) VALUES(?,?,?,?,?,?,?,?)').run(productId, x.label, x.price, x.old_price, x.price_usd, x.old_price_usd, x.stock, x.sort);
   }
   syncProductFromVariants(productId);
 }
@@ -657,12 +755,23 @@ admin.get('/settings', wrap((_req, res) => res.json(getSettings())));
 admin.put('/settings', wrap((req, res) => {
   const before = getSettings();
   const changed = {};
+  if ('delivery_zones' in req.body) {
+    let zones;
+    try { zones = typeof req.body.delivery_zones === 'string' ? JSON.parse(req.body.delivery_zones) : req.body.delivery_zones; } catch { zones = null; }
+    if (!Array.isArray(zones)) throw new HttpError(400, 'invalid_input');
+    req.body.delivery_zones = JSON.stringify(zones.slice(0, 100).map((z) => ({ name: str(z.name, 60), fee: Math.max(0, int(z.fee)) })).filter((z) => z.name));
+    req.body.cities = JSON.parse(req.body.delivery_zones).map((z) => z.name).join(',');
+  }
   for (const k of ADMIN_SETTINGS) if (k in req.body) {
-    const v = str(req.body[k], 2000);
+    const v = str(req.body[k], 5000);
     if ((before[k] ?? '') !== v) changed[k] = [before[k] ?? '', v];
     setSetting(k, v);
   }
   if (Object.keys(changed).length) logAdmin(req, 'settings_update', changed);
+  if (changed.usd_rate || changed.usd_round) {
+    const n = tx(() => repriceUsd());
+    if (n) logAdmin(req, 'usd_reprice', { products: n, rate: getSettings().usd_rate });
+  }
   res.json(getSettings());
 }));
 
@@ -693,9 +802,55 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
   setHeaders: (res) => res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'"),
 }));
 const PUBLIC = path.join(__dirname, '..', 'public');
-app.use(express.static(PUBLIC));
+// Link previews (WhatsApp, Facebook, Telegram, Instagram DMs) read <meta property="og:*"> from the HTML.
+const attr = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let indexHtml = null;
+function renderIndex(req, res, meta = {}) {
+  if (!indexHtml || process.env.NODE_ENV !== 'production') indexHtml = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
+  const s = getSettings();
+  const base = PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  const title = meta.title || s.store_name || 'Store';
+  const desc = meta.description || 'مۆبایل و ئەکسسوار — گەیاندن بۆ هەموو شارەکان | موبايلات وإكسسوارات مع التوصيل';
+  let image = meta.image;
+  if (!image) {
+    const b = db.prepare('SELECT image FROM banners WHERE active = 1 ORDER BY sort, id LIMIT 1').get();
+    image = b ? ogImageFor(b.image, UPLOAD_DIR) : null;
+  }
+  const tags = [
+    `<meta property="og:type" content="${meta.type || 'website'}">`,
+    `<meta property="og:site_name" content="${attr(s.store_name || '')}">`,
+    `<meta property="og:title" content="${attr(title)}">`,
+    `<meta property="og:description" content="${attr(desc)}">`,
+    `<meta property="og:url" content="${attr(base + (meta.path || req.originalUrl))}">`,
+    image ? `<meta property="og:image" content="${attr(base + image)}">` : '',
+    image ? '<meta name="twitter:card" content="summary_large_image">' : '',
+    meta.price ? `<meta property="product:price:amount" content="${meta.price}"><meta property="product:price:currency" content="IQD">` : '',
+    meta.redirect ? `<script>location.replace(${JSON.stringify(meta.redirect)})</script>` : '',
+  ].filter(Boolean).join('\n  ');
+  const html = indexHtml
+    .replace(/<title>[^<]*<\/title>/, `<title>${attr(title)}</title>`)
+    .replace(/<meta name="description" content="[^"]*">/, `<meta name="description" content="${attr(desc)}">`)
+    .replace('</head>', `  ${tags}\n</head>`);
+  res.type('html').send(html);
+}
+// Shareable product link: /p/12 → preview card for crawlers, then the app opens the product.
+app.get('/p/:id', (req, res) => {
+  const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(int(req.params.id));
+  if (!p) return res.redirect('/');
+  const s = getSettings();
+  const price = Number(p.price).toLocaleString('en-US');
+  const name = [p.name_ku, p.name_ar && p.name_ar !== p.name_ku ? p.name_ar : null].filter(Boolean).join(' | ');
+  renderIndex(req, res, {
+    title: `${p.name_ku} — ${price} د.ع`,
+    description: `${name} — ${price} د.ع${p.stock > 0 ? '' : ' (نەماوە / نفذت الكمية)'} · ${s.store_name || ''}`,
+    image: ogImageFor(p.image, UPLOAD_DIR), type: 'product', price: p.price, path: `/p/${p.id}`,
+    redirect: `/#/product/${p.id}`,
+  });
+});
+app.get('/', (req, res) => renderIndex(req, res));
+app.use(express.static(PUBLIC, { index: false }));
 app.get('/admin*', (_req, res) => res.sendFile(path.join(PUBLIC, 'admin', 'index.html')));
-app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC, 'index.html')));
+app.get('*', (req, res) => renderIndex(req, res));
 
 // ---------------- errors ----------------
 app.use((err, _req, res, _next) => {
