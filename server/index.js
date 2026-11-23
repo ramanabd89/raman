@@ -10,7 +10,7 @@ const { notify, orderMessage, escHtml, enabled: telegramEnabled } = require('./n
 const { startBackups, snapshot, listBackups, DIR: BACKUP_DIR } = require('./backup');
 const { newSecret, verifyTotp, otpauthUrl } = require('./totp');
 const { processUpload, ogImageFor } = require('./images');
-const { normalize, searchClause } = require('./search');
+const { normalize, searchClause, relevance } = require('./search');
 const extrasModule = require('./extras');
 const smart = require('./smart');
 const { isStaff } = extrasModule;
@@ -127,8 +127,9 @@ function repriceUsd() {
 
 // ---- search index: normalised names + brand + category names (see server/search.js) ----
 function indexProduct(id) {
-  const p = db.prepare(`SELECT p.name_ku, p.name_ar, p.name_en, p.brand, c.name_ku ck, c.name_ar ca, c.name_en ce, pc.name_ku pk, pc.name_ar pa, pc.name_en pe
-    FROM products p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN categories pc ON pc.id = c.parent_id WHERE p.id = ?`).get(id);
+  // Own category only: a screen protector must not match "case" through its parent "Cases & Protection".
+  const p = db.prepare(`SELECT p.name_ku, p.name_ar, p.name_en, p.brand, c.name_ku ck, c.name_ar ca, c.name_en ce
+    FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = ?`).get(id);
   if (!p) return;
   const labels = db.prepare('SELECT label FROM product_variants WHERE product_id = ?').all(id).map((v) => v.label);
   db.prepare('UPDATE products SET search_text = ? WHERE id = ?').run(` ${normalize([...Object.values(p), ...labels].filter(Boolean).join(' '))} `, id);
@@ -318,9 +319,10 @@ function productQuery(q, { admin = false } = {}) {
     where.push('(p.category_id = ? OR p.category_id IN (SELECT id FROM categories WHERE parent_id = ?))');
     params.push(cid, cid);
   }
+  let searchTokens = null;
   if (q.q) {
     const c = searchClause(str(q.q, 100));
-    if (c) { where.push(`(${c.sql})`); params.push(...c.params); }
+    if (c) { where.push(`(${c.sql})`); params.push(...c.params); searchTokens = c.tokens; }
   }
   if (q.flash) where.push('p.flash_sale = 1');
   if (q.featured) where.push('p.featured = 1');
@@ -335,7 +337,14 @@ function productQuery(q, { admin = false } = {}) {
   const limit = Math.min(int(q.limit, 40), 200);
   const offset = Math.max(int(q.offset, 0), 0);
   const sql = `SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
-  return db.prepare(sql).all(...params, limit, offset).map((p) => productOut(p, admin));
+  const rows = db.prepare(sql).all(...params, limit, offset);
+  // Search with the default order: best name matches first (e.g. the case named "17 Pro Max" before a generic one).
+  if (searchTokens && (!q.sort || q.sort === 'foryou')) {
+    rows.forEach((r, i) => { r._rel = relevance(r, searchTokens); r._i = i; });
+    rows.sort((a, b) => b._rel - a._rel || a._i - b._i);
+    rows.forEach((r) => { delete r._rel; delete r._i; });
+  }
+  return rows.map((p) => productOut(p, admin));
 }
 
 app.get('/api/products', wrap((req, res) => res.json(productQuery(req.query))));

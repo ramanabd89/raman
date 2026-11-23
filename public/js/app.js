@@ -50,6 +50,12 @@
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
+  // Phone's language as the first guess: Arabic → ar, English → en, otherwise Kurdish.
+  function detectLang() {
+    const langs = (navigator.languages || [navigator.language || '']).map((l) => String(l).toLowerCase());
+    for (const l of langs) { if (l.startsWith('ckb') || l.startsWith('ku')) return 'ku'; if (l.startsWith('ar')) return 'ar'; if (l.startsWith('en')) return 'en'; }
+    return 'ku';
+  }
   // ---------------- state ----------------
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -57,7 +63,8 @@
     del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
   };
   const S = {
-    lang: store.get('lang', 'ku'),
+    lang: store.get('lang', null) || detectLang(),
+    langChosen: !!store.get('lang', null),
     token: store.get('token', null),
     user: store.get('user', null),
     cart: store.get('cart', []),
@@ -1269,6 +1276,28 @@
   }
   const campaignSource = () => { const s = store.get('src', null); return s && Date.now() - s.t < 30 * 864e5 ? s.v : ''; };
 
+  // First visit: ask which language (the phone's language is highlighted).
+  function askLanguage() {
+    return new Promise((resolve) => {
+      const el = document.createElement('div');
+      el.className = 'lang-gate';
+      el.innerHTML = `<div class="lang-card" role="dialog" aria-modal="true" aria-label="Language">
+        <div class="logo" style="justify-content:center;margin-bottom:6px"><span>${esc(S.settings.store_name || '')}</span><span class="dot"></span></div>
+        <h2>زمانێک هەڵبژێرە<br><span>اختر اللغة · Choose your language</span></h2>
+        ${[['ku', 'کوردی', 'سۆرانی'], ['ar', 'العربية', 'عربي'], ['en', 'English', 'English']].map(([k, l, sub]) =>
+          `<button class="lang-opt ${S.lang === k ? 'suggested' : ''}" data-pick="${k}" lang="${k === 'ku' ? 'ckb' : k}" dir="${k === 'en' ? 'ltr' : 'rtl'}"><b>${l}</b><small>${sub}</small></button>`).join('')}
+      </div>`;
+      document.body.appendChild(el);
+      document.body.style.overflow = 'hidden';
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-pick]'); if (!b) return;
+        S.lang = b.dataset.pick; S.langChosen = true; store.set('lang', S.lang);
+        el.remove(); document.body.style.overflow = '';
+        resolve();
+      });
+    });
+  }
+
   async function init() {
     captureSource();
     $('#year').textContent = new Date().getFullYear();
@@ -1288,6 +1317,7 @@
     const fl = document.createElement('div'); fl.className = 'footer-links'; fl.innerHTML = `<a href="#/faq">${T('faq')}</a> · <a href="#/support">${T('support')}</a>`;
     document.querySelector('.footer .container').insertBefore(fl, document.querySelector('.footer .container').lastElementChild);
     if (S.user && S.user.role !== 'customer') { try { const me = await api('/me'); S.adminPath = me.admin_path; S.user = me.user; } catch { /* signed out */ } }
+    if (!S.langChosen) { await askLanguage(); applyLang(); }
     renderMenu();
     renderWhatsApp();
     window.addEventListener('hashchange', route);

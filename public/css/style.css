@@ -512,3 +512,15 @@ table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
 .fd-reasons svg { width: 16px; height: 16px; color: var(--green); flex: 0 0 auto; }
 .fd-actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; margin-top: auto; padding-top: 6px; }
 .fd-actions .btn { padding: 12px 10px; font-size: 14px; }
+
+/* first-visit language picker */
+.lang-gate { position: fixed; inset: 0; z-index: 200; background: linear-gradient(160deg, #FFF3EA, #F7F8FA 55%); display: grid; place-items: center; padding: 20px; }
+.lang-card { width: 100%; max-width: 380px; text-align: center; }
+.lang-card h2 { font-size: 22px; margin: 10px 0 22px; line-height: 1.5; }
+.lang-card h2 span { font-size: 14px; color: var(--ink-2); font-weight: 600; }
+.lang-opt { width: 100%; display: flex; align-items: center; justify-content: space-between; background: #fff; border: 2px solid var(--line); border-radius: 18px; padding: 18px 20px; margin-bottom: 12px; box-shadow: var(--shadow); transition: transform .1s, border-color .15s; }
+.lang-opt:active { transform: scale(.98); }
+.lang-opt b { font-size: 20px; }
+.lang-opt small { color: var(--muted); font-weight: 600; }
+.lang-opt.suggested { border-color: var(--brand); background: var(--brand-soft); }
+.lang-opt.suggested b { color: var(--brand); }

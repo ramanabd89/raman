@@ -346,6 +346,29 @@ let stop = () => {};
   r = await call('/finder?max=100000&uses=basic');
   check('nothing in budget → closest phone above it', !r.data.results.length && r.data.stretch && r.data.stretch.over_by > 0, r.data);
 
+  // ---------- precise search ----------
+  const mk = async (b) => (await call('/admin/products', { method: 'POST', token: A2, body: { brand: 'Apple', stock: 5, ...b } })).data.id;
+  const casesCat = (await call('/products/13')).data.product.category_id;   // "Cases"
+  const glassCat = (await call('/products/14')).data.product.category_id;   // "Screen Protectors" (same parent "Cases & Protection")
+  const iphoneCat = (await call('/products/2')).data.product.category_id;
+  const PH17 = await mk({ name_ku: 'ئایفۆن ١٧ پرۆ ماکس', name_ar: 'آيفون 17 برو ماكس', name_en: 'iPhone 17 Pro Max', category_id: iphoneCat, price: 2000000 });
+  const C1 = await mk({ name_ku: 'کەڤەری سیلیکۆن ئایفۆن ١٧ پرۆ ماکس', name_en: 'iPhone 17 Pro Max Silicone Case', category_id: casesCat, price: 20000 });
+  const C2 = await mk({ name_ku: 'غڵافی شەفاف بۆ ئایفۆن 17 Pro Max', name_en: 'Clear Cover for iPhone 17 Pro Max', category_id: casesCat, price: 15000 });
+  const C3 = await mk({ name_ku: 'کەڤەری ئایفۆن ١٧ پرۆ', name_en: 'iPhone 17 Pro Case', category_id: casesCat, price: 18000 });
+  const G17 = await mk({ name_ku: 'شاشەی پاراستنی ئایفۆن ١٧ پرۆ ماکس', name_en: 'iPhone 17 Pro Max Screen Protector', category_id: glassCat, price: 7000 });
+  const ids = async (q) => (await call(`/products?q=${encodeURIComponent(q)}`)).data.map((x) => x.id);
+  const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+  for (const q of ['كفر ١٧ بروماكس', 'كفر 17 برو ماكس', 'كفر 17promax', 'cover 17 pro max', 'کەڤەری ١٧ پرۆ ماکس', 'جراب ايفون 17 برو ماكس']) {
+    const got = await ids(q);
+    check(`search "${q}" → only the two 17 Pro Max cases`, same(got, [C1, C2]), got);
+  }
+  check('"كفر 17 برو" also finds the 17 Pro case', (await ids('كفر 17 برو')).includes(C3));
+  check('"شاشة حماية 17 برو ماكس" → only the screen protector', same(await ids('شاشة حماية 17 برو ماكس'), [G17]));
+  check('"ايفون 17 برو ماكس" → the phone first', (await ids('ايفون 17 برو ماكس'))[0] === PH17);
+  const sam = (await call(`/products?q=${encodeURIComponent('سامسونك')}`)).data;
+  check('"سامسونك" → only Samsung products', sam.length >= 3 && sam.every((x) => /samsung|galaxy/i.test(`${x.name_ku} ${x.name_en} ${x.brand}`)), sam.map((x) => x.name_en));
+  check('"17" does not match 170 / 1700', !(await ids('17')).some((id) => id === 15));
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);
