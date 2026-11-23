@@ -5,10 +5,10 @@ const crypto = require('crypto');
 // ---- staff roles: which admin sections each role may open ----
 const ROLE_SECTIONS = {
   admin: '*',
-  manager: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'repairs', 'products', 'catalog', 'stock', 'coupons', 'expenses', 'analytics', 'faqs', 'banners'],
+  manager: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'repairs', 'products', 'catalog', 'stock', 'coupons', 'expenses', 'analytics', 'faqs', 'banners', 'reviews'],
   orders: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'repairs'],
   technician: ['dashboard', 'repairs'],
-  products: ['dashboard', 'products', 'catalog', 'stock'],
+  products: ['dashboard', 'products', 'catalog', 'stock', 'reviews'],
 };
 const STAFF_ROLES = Object.keys(ROLE_SECTIONS);
 const isStaff = (role) => STAFF_ROLES.includes(role);
@@ -17,7 +17,7 @@ const SECTION_OF = {
   stats: 'dashboard', orders: 'orders', users: 'customers', carts: 'carts',
   products: 'products', upload: 'products', 'bulk-price': 'products', 'variant-presets': 'products',
   categories: 'catalog', tags: 'catalog', stock: 'stock', coupons: 'coupons',
-  expenses: 'expenses', profit: 'expenses', tradeins: 'tradein', 'tradein-models': 'tradein', 'tradein-rules': 'tradein', repairs: 'repairs', 'repair-prices': 'repairs', 'repair-services': 'repairs', analytics: 'analytics', faqs: 'faqs', banners: 'banners',
+  expenses: 'expenses', profit: 'expenses', tradeins: 'tradein', 'tradein-models': 'tradein', 'tradein-rules': 'tradein', repairs: 'repairs', 'repair-prices': 'repairs', 'repair-services': 'repairs', analytics: 'analytics', faqs: 'faqs', banners: 'banners', reviews: 'reviews',
 };
 function canAccess(role, section) {
   const allowed = ROLE_SECTIONS[role];
@@ -131,7 +131,7 @@ function register(app, admin, h) {
     for (let i = 0; i < months; i++) {
       const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
       const m = d.toISOString().slice(0, 7);
-      const o = db.prepare(`SELECT COUNT(*) orders, COALESCE(SUM(subtotal - discount), 0) sales, COALESCE(SUM(wallet_used), 0) wallet,
+      const o = db.prepare(`SELECT COUNT(*) orders, COALESCE(SUM(subtotal - discount - bundle_discount), 0) sales, COALESCE(SUM(wallet_used), 0) wallet,
           COALESCE(SUM(delivery_fee), 0) delivery FROM orders WHERE status = 'delivered' AND substr(updated_at, 1, 7) = ?`).get(m);
       const c = db.prepare(`SELECT COALESCE(SUM(CASE WHEN oi.cost IS NOT NULL THEN oi.cost * oi.qty END), 0) cogs,
           COALESCE(SUM(CASE WHEN oi.cost IS NULL THEN 1 END), 0) missing FROM order_items oi JOIN orders o ON o.id = oi.order_id

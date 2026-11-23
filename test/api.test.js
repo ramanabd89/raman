@@ -439,6 +439,53 @@ let stop = () => {};
   check('iPhone 16 Pro Max: no iPhone 16 (non-Pro) case, no Lightning', !i16.some((n) => /lightning/i.test(n) || /^iPhone 16 Silicone/i.test(n)), i16);
   check('suggestions are never other phones', !(await bt(1)).some((n) => /^(iPhone|Samsung Galaxy|Xiaomi Redmi) .*(GB|Ultra|A55)$/i.test(n)), i16);
 
+  // ---------- reviews ----------
+  r = await call('/products/1/reviews', { method: 'POST', token: Q, body: { rating: 5, comment: 'x' } });
+  check('review: only buyers can review', r.status === 403 && r.data.error === 'review_buyers_only', r.data);
+  r = await call('/products/6/reviews', { method: 'POST', token: Q, body: { rating: 4, comment: 'زين جداً', photos: ['/uploads/../../etc/passwd', 'https://evil.example/x.png'] } });
+  check('review by a buyer is published at once', r.data.status === 'approved', r.data);
+  r = await call('/products/6/reviews', { token: Q });
+  check('review summary + verified badge, foreign photo paths dropped', r.data.count === 1 && r.data.avg === 4 && r.data.list[0].verified && r.data.list[0].photos.length === 0 && r.data.mine, r.data);
+  check('review shows short name, never the phone', !JSON.stringify(r.data.list).includes('0750'), r.data.list);
+  r = await call('/products?ids=6');
+  check('product card carries rating', r.data[0].rating_count === 1 && r.data[0].rating_avg === 4, r.data[0]);
+  r = await call('/products/6/reviews', { method: 'POST', token: Q, body: { rating: 0 } });
+  check('review rating must be 1–5', r.status === 400, r.data);
+  r = await call('/admin/reviews?status=approved', { token: A2 });
+  const rv = r.data.list[0];
+  check('admin sees reviews', rv && rv.product_id === 6, r.data);
+  await call(`/admin/reviews/${rv.id}`, { method: 'PATCH', token: A2, body: { status: 'hidden', reply: 'شكراً' } });
+  r = await call('/products?ids=6');
+  check('hidden review leaves the average', r.data[0].rating_count === 0, r.data[0]);
+
+  // ---------- filters, facets, recently viewed ----------
+  r = await call('/products/facets?category=1');
+  check('facets list brands and storages', r.data.brands.some((b) => b.v === 'Apple') && r.data.storages.length > 0 && r.data.max > r.data.min, r.data);
+  r = await call('/products?category=1&brand=samsung');
+  check('brand filter', r.data.length > 0 && r.data.every((p) => p.brand === 'Samsung'), r.data.map((p) => p.brand));
+  r = await call('/products?category=1&max_price=600000');
+  check('max price filter', r.data.length > 0 && r.data.every((p) => p.price <= 600000), r.data.map((p) => p.price));
+  r = await call('/products?category=1&storage=256');
+  check('storage filter', r.data.length > 0 && r.data.every((p) => p.attrs.storage === 256), r.data.map((p) => p.attrs));
+  r = await call('/products?ids=3,1,2');
+  check('ids keep the given order', r.data.map((p) => p.id).join() === '3,1,2', r.data.map((p) => p.id));
+  r = await call('/products/1');
+  check('product page has real social proof numbers', typeof r.data.proof.viewers === 'number' && typeof r.data.proof.sold30 === 'number', r.data.proof);
+
+  // ---------- bundle deal ----------
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { bundle_discount_percent: '10' } });
+  const s24b = (await call('/products/3')).data.bundle[0];
+  r = await call('/cart/quote', { method: 'POST', body: { items: [{ id: 3, qty: 1 }, { id: s24b.id, qty: 1 }] } });
+  check('bundle: 10% off a fitting accessory bought with the phone', r.data.bundle_discount === Math.floor(s24b.price / 10), r.data);
+  r = await call('/cart/quote', { method: 'POST', body: { items: [{ id: s24b.id, qty: 1 }] } });
+  check('bundle: no discount without a phone', r.data.bundle_discount === 0, r.data);
+  const lightning = (await call('/products?q=lightning')).data.find((p) => /lightning/i.test(p.name_en));
+  if (lightning) {
+    r = await call('/cart/quote', { method: 'POST', body: { items: [{ id: 3, qty: 1 }, { id: lightning.id, qty: 1 }] } });
+    check('bundle: no discount on an accessory that does not fit', r.data.bundle_discount === 0, r.data);
+  }
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { bundle_discount_percent: '0' } });
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);

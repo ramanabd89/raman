@@ -144,6 +144,29 @@ addColumn('orders', 'cashback', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('products', 'attrs', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('orders', 'tradein_id', 'INTEGER');
 addColumn('orders', 'tradein_credit', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('products', 'rating_avg', 'REAL NOT NULL DEFAULT 0');
+addColumn('products', 'rating_count', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('products', 'video_url', 'TEXT');
+addColumn('orders', 'bundle_discount', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+CREATE TABLE IF NOT EXISTS reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  rating INTEGER NOT NULL,
+  comment TEXT,
+  photos TEXT NOT NULL DEFAULT '[]',
+  name TEXT,
+  city TEXT,
+  verified INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reply TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_user_product ON reviews(product_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id, status);
+`);
 db.exec(`
 CREATE TABLE IF NOT EXISTS repair_services (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -327,6 +350,7 @@ CREATE TABLE IF NOT EXISTS page_views (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_page_views_day ON page_views(day);
+CREATE INDEX IF NOT EXISTS idx_page_views_product ON page_views(product_id, created_at);
 CREATE TABLE IF NOT EXISTS faqs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   q_ku TEXT NOT NULL, q_ar TEXT, q_en TEXT,
@@ -495,7 +519,7 @@ function bannerSvg(c1, c2, kind) {
 seed();
 for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
   slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',
-  proof_enabled: '1',
+  proof_enabled: '1', reviews_enabled: '1', reviews_buyers_only: '1', bundle_discount_percent: '0', store_hours: '',
   repair_enabled: '1', repair_pickup: '1', repair_pickup_fee: '0', repair_free_diagnosis: '1', repair_honest_pct: '50',
   repair_open: '10', repair_close: '21', repair_closed_days: '5', repair_slot_capacity: '2',
   tradein_enabled: '1',

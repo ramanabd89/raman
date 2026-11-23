@@ -79,7 +79,7 @@
   const NAV = [
     ['الرئيسية', [['dashboard', '📊 لوحة المعلومات', 'dashboard'], ['analytics', '👁️ تحليل الزوار', 'analytics']]],
     ['المبيعات والطلبات', [['orders', '📦 الطلبات', 'orders'], ['users', '👥 الزبائن', 'customers'], ['carts', '🛒 السلات المتروكة', 'carts'], ['tradein', '🔄 تبديل الأجهزة', 'tradein'], ['repairs', '🔧 التصليح', 'repairs'], ['coupons', '🏷️ الكوبونات', 'coupons'], ['expenses', '💸 المصاريف والأرباح', 'expenses']]],
-    ['المخزن والمنتجات', [['products', '📱 المنتجات', 'products'], ['bulk', '💱 تغيير الأسعار بالجملة', 'products'], ['categories', '🗂️ الأقسام', 'catalog'], ['presets', '📐 قوالب الأنواع والسعات', 'products'], ['tags', '🔖 ملصقات المنتجات', 'catalog'], ['stock', '📋 حركة المخزن', 'stock']]],
+    ['المخزن والمنتجات', [['products', '📱 المنتجات', 'products'], ['bulk', '💱 تغيير الأسعار بالجملة', 'products'], ['categories', '🗂️ الأقسام', 'catalog'], ['presets', '📐 قوالب الأنواع والسعات', 'products'], ['tags', '🔖 ملصقات المنتجات', 'catalog'], ['reviews', '⭐ تقييمات الزبائن', 'reviews'], ['stock', '📋 حركة المخزن', 'stock']]],
     ['الموقع', [['banners', '🖼️ البانرات', 'banners'], ['faqs', '❓ الأسئلة الشائعة', 'faqs'], ['settings', '⚙️ الإعدادات', 'admin_only']]],
     ['الأمان', [['staff', '🧑‍💼 مدراء النظام', 'admin_only'], ['security', '🔒 الأمان والنسخ', 'all']]],
   ];
@@ -201,6 +201,7 @@
         <table class="t" style="margin-top:10px">
           <tr><td>المنتجات</td><td class="num">${fmt(o.subtotal)}</td></tr>
           <tr><td>التوصيل</td><td class="num">${fmt(o.delivery_fee)}</td></tr>
+          ${o.bundle_discount ? `<tr><td>📦 خصم البكج</td><td class="num">-${fmt(o.bundle_discount)}</td></tr>` : ''}
           ${o.discount ? `<tr><td>كوبون ${esc(o.coupon_code)}</td><td class="num">-${fmt(o.discount)}</td></tr>` : ''}
           ${o.tradein ? `<tr><td>🔄 تبديل ${esc(o.tradein.label)} <span class="muted">(${esc(TI_ST[o.tradein.status] || o.tradein.status)})</span></td><td class="num">-${fmt(o.tradein_credit)}</td></tr>` : ''}
           ${o.wallet_used ? `<tr><td>من المحفظة</td><td class="num">-${fmt(o.wallet_used)}</td></tr>` : ''}
@@ -297,6 +298,7 @@
         <div class="field"><label>عدد المبيعات</label><div class="input num" style="display:flex;align-items:center;background:#F2F3F6" title="ينحسب تلقائياً من الطلبات">${p.sold ?? 0} <span class="muted" style="margin-inline-start:8px;font-size:13px">(تلقائي من الطلبات)</span></div></div>
         <div class="field full"><label>الأنواع (السعة / اللون) — اختياري. إذا أضفت أنواعاً، السعر والمخزون يؤخذان منها</label>
           <div id="variants"></div><button type="button" class="sm-btn" id="addVar">+ إضافة نوع</button> <button type="button" class="sm-btn primary" id="genVar">⚡ توليد من القوالب</button><div id="genBox"></div></div>
+        <div class="field full"><label>🎬 فيديو المنتج (اختياري) — رابط تيك توك / يوتيوب / انستغرام، أو رابط ملف mp4</label><input class="input" name="video_url" dir="ltr" value="${esc(p.video_url || '')}" placeholder="https://www.tiktok.com/@shop/video/..."></div>
         ${imgField('image', p.image, 'الصورة الرئيسية')}
         <div class="field full"><label>صور إضافية</label><label class="sm-btn" style="cursor:pointer;display:inline-block">+ إضافة صور<input type="file" accept="image/*" multiple hidden id="galUp"></label><div class="gallery-list" id="gal"></div></div>
         ${langFields('desc', p, 'الوصف', true)}
@@ -563,6 +565,11 @@
       ${F('store_map_url', 'رابط الموقع على خرائط Google')}
       ${F('exchange_days', 'مدة التبديل بالأيام (0 = لا تظهر)', 'number')}
       ${F('warranty_text', 'نص الضمان (مثل: ضمان سنة من الوكيل)')}
+      ${F('store_hours', '🕘 أوقات الدوام (تظهر بقسم «زورنا بالمحل»)', 'text', 'placeholder="كل يوم 10 الصبح – 10 بالليل"')}
+      ${F('bundle_discount_percent', '📦 خصم البكج: نسبة الخصم على الإكسسوارات المناسبة لما تنشرى ويا موبايل (%) — 0 للإيقاف', 'number', 'min="0" max="50"')}
+      <div class="field"><label>⭐ تقييمات الزبائن</label><select class="input" name="reviews_enabled"><option value="1" ${s.reviews_enabled !== '0' ? 'selected' : ''}>شغّالة</option><option value="0" ${s.reviews_enabled === '0' ? 'selected' : ''}>مطفأة</option></select></div>
+      <div class="field"><label>منو يكدر يقيّم؟</label><select class="input" name="reviews_buyers_only"><option value="1" ${s.reviews_buyers_only !== '0' ? 'selected' : ''}>بس الي اشتروا المنتج (تقييمات حقيقية — منصوح)</option><option value="0" ${s.reviews_buyers_only === '0' ? 'selected' : ''}>أي زبون مسجّل (تحتاج موافقتك قبل النشر)</option></select></div>
+      <div class="field"><label>🛡️ مربع «شلون تتأكد إنه أصلي؟» بصفحة الموبايل</label><select class="input" name="proof_enabled"><option value="1" ${s.proof_enabled !== '0' ? 'selected' : ''}>يظهر</option><option value="0" ${s.proof_enabled === '0' ? 'selected' : ''}>مخفي</option></select></div>
       ${F('slogan', 'شعار المتجر (جملة قصيرة تحت الاسم)')}
       ${F('seo_description', 'وصف المتجر لمحركات البحث ومعاينة الروابط')}
       <div class="field"><label>عرض الأسعار</label><select class="input" name="price_display"><option value="iqd" ${s.price_display !== 'both' ? 'selected' : ''}>بالدينار فقط</option><option value="both" ${s.price_display === 'both' ? 'selected' : ''}>الدينار + تقريبي بالدولار</option></select></div>
@@ -1148,8 +1155,43 @@
     });
   }
 
+  // ---------- customer reviews ----------
+  async function reviews() {
+    const c = layout('reviews', '⭐ تقييمات الزبائن');
+    const st = new URLSearchParams(location.hash.split('?')[1] || '').get('s') || 'pending';
+    const ST = { pending: '⏳ تنتظر موافقتك', approved: '✅ منشورة', hidden: '🙈 مخفية' };
+    const { list, counts } = await api(`/admin/reviews?status=${st}`);
+    const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+    c.innerHTML = `<div class="card panel"><p class="muted" style="margin-top:0">تقييمات المشترين الحقيقيين تنشر مباشرة وعليها علامة «اشترى من عدنا». لا تخفي التقييم السلبي إذا جان حقيقي — رد عليه بأدب وحل المشكلة، هذا يبني ثقة أكثر من التقييمات الكاملة.</p>
+      <div class="tabs-row">${Object.entries(ST).map(([k, l]) => `<a class="sm-btn ${k === st ? 'primary' : ''}" href="#/reviews?s=${k}">${l} (${counts[k] || 0})</a>`).join(' ')}</div></div>
+      ${list.length ? list.map((r) => `<div class="card panel rv-adm" data-id="${r.id}">
+        <div style="display:flex;gap:12px;align-items:center"><img src="${safeImg(r.product_image)}" style="width:48px;height:48px;object-fit:contain;border-radius:10px;background:#F4F5F8">
+          <div style="flex:1"><b>${esc(r.product_name)}</b><div><span style="color:#F5A524;font-size:18px">${stars(r.rating)}</span> · ${esc(r.name || '')} ${r.city ? `· ${esc(r.city)}` : ''} · <span class="num muted">${esc(r.phone || '')}</span> ${r.verified ? '<span class="pill" style="background:#E7F7EE;color:#1F9D55">✔ اشترى من عدنا</span>' : '<span class="pill">غير مشتري</span>'}</div>
+          <div class="muted num">${esc(r.created_at)}</div></div></div>
+        ${r.comment ? `<p style="white-space:pre-wrap">${esc(r.comment)}</p>` : ''}
+        ${r.photos.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${r.photos.map((u) => `<a href="${safeImg(u)}" target="_blank"><img src="${safeImg(u)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px"></a>`).join('')}</div>` : ''}
+        <div class="field" style="margin-top:10px"><label>رد المتجر (يظهر تحت التقييم)</label><textarea class="input" data-reply rows="2">${esc(r.reply || '')}</textarea></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${r.status !== 'approved' ? '<button class="sm-btn primary" data-st="approved">✅ نشر</button>' : ''}
+          ${r.status !== 'hidden' ? '<button class="sm-btn" data-st="hidden">🙈 إخفاء</button>' : ''}
+          <button class="sm-btn" data-save>💬 حفظ الرد</button>
+          <button class="sm-btn danger" data-del>🗑 حذف</button></div></div>`).join('') : '<div class="card panel muted">ما أكو تقييمات هنا</div>'}`;
+    c.onclick = async (e) => {
+      const card = e.target.closest('[data-id]'); if (!card) return;
+      const id = card.dataset.id;
+      const reply = card.querySelector('[data-reply]').value;
+      try {
+        if (e.target.closest('[data-st]')) await api(`/admin/reviews/${id}`, { method: 'PATCH', body: { status: e.target.closest('[data-st]').dataset.st, reply } });
+        else if (e.target.closest('[data-save]')) { await api(`/admin/reviews/${id}`, { method: 'PATCH', body: { reply } }); toast('تم حفظ الرد'); return; }
+        else if (e.target.closest('[data-del]')) { if (!confirm('حذف التقييم نهائياً؟')) return; await api(`/admin/reviews/${id}`, { method: 'DELETE' }); }
+        else return;
+        reviews();
+      } catch (err) { toast(err.message); }
+    };
+  }
+
   // ---------- router ----------
-  const ROUTES = { repairs, tradein, dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
+  const ROUTES = { reviews, repairs, tradein, dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
   async function render() {
     if (!token) return showLogin();
     if (!ME) { try { ME = await api('/me'); } catch { return; } if (ME.user.role === 'customer') return showLogin(ERR.forbidden); }

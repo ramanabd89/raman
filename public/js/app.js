@@ -49,6 +49,9 @@
     spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 2 9.4 7.4 4 9l5.4 1.6L11 16l1.6-5.4L18 9l-5.4-1.6L11 2Zm7 11-.9 2.6-2.6.9 2.6.9.9 2.6.9-2.6 2.6-.9-2.6-.9L18 13Z"/></svg>',
     wrench: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.7 6.3a1 1 0 0 0-1.6-.3l-2.6 2.6-2-.4-.4-2 2.6-2.6a1 1 0 0 0-.3-1.6 6 6 0 0 0-7.9 7.6l-6.7 6.7a2.5 2.5 0 0 0 3.5 3.5l6.7-6.7a6 6 0 0 0 7.6-7.9Z"/></svg>',
     user: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 12c4.4 0 8 2.2 8 5v1a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1c0-2.8 3.6-5 8-5Z"/></svg>',
+    sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.1v13.8a1 1 0 0 0 1.5.9l11-6.9a1 1 0 0 0 0-1.8l-11-6.9A1 1 0 0 0 8 5.1Z"/></svg>',
+    scale: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
@@ -88,6 +91,7 @@
   };
   const L = (obj, field) => obj[`${field}_${S.lang}`] || obj[`${field}_ku`] || obj[`${field}_en`] || '';
   const bidiName = (text) => esc(text).replace(/([A-Za-z0-9][A-Za-z0-9.+\-/]*(?: [A-Za-z0-9][A-Za-z0-9.+\-/]*)*)/g, '<bdi dir="ltr">$1</bdi>');
+  const stars = (r) => { const f = Math.round(Number(r) || 0); return `<span class="stars" aria-label="${esc(String(r))}/5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= f ? 'on' : ''}">${I.star}</i>`).join('')}</span>`; };
   const fmt = (n) => Number(n || 0).toLocaleString('en-US');
   const money = (n) => `<span class="price"><span class="num">${fmt(n)}</span><small>${T('currency')}</small></span>`;
   const safeUrl = (u) => (/^(https?:\/\/|\/|#)/i.test(String(u || '')) ? String(u) : '');
@@ -135,22 +139,34 @@
     $('#btnCart').innerHTML = I.basket + (n ? `<span class="badge-count num">${n}</span>` : '');
   }
   const cartKey = (i) => `${i.id}:${i.variant_id || ''}`;
-  function addToCart(p, qty = 1, variant = null) {
-    if (p.has_variants && !variant) { location.hash = `#/product/${p.id}`; return; }
+  // put a product in the cart (no UI); false when it can't be added
+  function pushCart(p, qty = 1, variant = null) {
     const stock = variant ? variant.stock : p.stock;
-    if (stock <= 0) { toast(T('outOfStockMsg')); return; }
+    if (stock <= 0) { toast(T('outOfStockMsg')); return false; }
     const key = `${p.id}:${variant ? variant.id : ''}`;
     const ex = S.cart.find((i) => cartKey(i) === key);
     const cur = ex ? ex.qty : 0;
-    if (cur + qty > stock) { toast(T('maxStock', { x: stock })); return; }
+    if (cur + qty > stock) { toast(T('maxStock', { x: stock })); return false; }
     if (ex) ex.qty += qty;
     else S.cart.push({ id: p.id, variant_id: variant ? variant.id : null, variant_label: variant ? variant.label : null, qty,
       name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en, price: variant ? variant.price : p.price, image: p.image, stock, is_phone: !!(p.attrs && p.attrs.os) });
+    return true;
+  }
+  function addToCart(p, qty = 1, variant = null) {
+    if (p.has_variants && !variant) { location.hash = `#/product/${p.id}`; return; }
+    if (!pushCart(p, qty, variant)) return;
     saveCart();
     if (S.bundle && S.bundle.forId === p.id && S.bundle.items.length) showBundleSheet(S.bundle.items);
     else toast(T('added'));
   }
   const productCache = new Map();
+  function openSheet(html) {
+    const el = $('#uiSheet');
+    el.innerHTML = `<div class="grab"></div>${html}`;
+    el.onclick = null;
+    openPanel(el);
+    return el;
+  }
   function showBundleSheet(items) {
     let el = $('#bundleSheet');
     if (!el) { el = document.createElement('div'); el.id = 'bundleSheet'; el.className = 'sheet'; document.body.appendChild(el); }
@@ -341,6 +357,7 @@
           ${p.brand ? `<div class="c-brand">${esc(p.brand)}</div>` : ''}
           <div class="nm">${bidiName(L(p, 'name'))}</div>
           ${spec ? `<div class="c-spec num">${esc(spec)}</div>` : ''}
+          ${p.rating_count ? `<div class="c-rate">${I.star}<b class="num">${Number(p.rating_avg).toFixed(1)}</b><span class="num">(${p.rating_count})</span></div>` : ''}
           <div class="foot">
             <div class="prices">${p.has_variants ? `<small class="c-from">${T('from')}</small>` : ''}${money(p.price)}
               ${off ? `<div class="c-old"><span class="old-price num">${fmt(p.old_price)}</span><span class="off-pill num">-${off}%</span></div>` : ''}</div>
@@ -385,10 +402,18 @@
         </div>
 
         <div id="flash"></div>
+        <div id="seenRow"></div>
         <div class="sort-tabs" id="sortTabs"></div>
         <div id="grid">${gridSkeleton()}</div>
+        ${S.settings.store_address ? `<section class="card visit">
+          <span class="visit-ic">${I.map}</span>
+          <div class="visit-txt"><b>${T('visitUs')}</b><p>${esc(S.settings.store_address)}</p>${S.settings.store_hours ? `<small>🕘 ${esc(S.settings.store_hours)}</small>` : ''}<small>${T('visitSub')}</small></div>
+          ${safeUrl(S.settings.store_map_url) ? `<a class="btn btn-soft" href="${esc(safeUrl(S.settings.store_map_url))}" target="_blank" rel="noopener">${I.map}${T('openMap')}</a>` : ''}
+        </section>` : ''}
       </div>`;
+    S.filters = {};
     renderSortTabs(() => loadGrid({}));
+    renderSeen();
     startRepairAd();
     const [banners, flash] = await Promise.all([api('/banners').catch(() => []), api('/products?flash=1&limit=12').catch(() => [])]);
     renderSlider(banners);
@@ -435,15 +460,87 @@
     };
   }
 
-  async function loadGrid(params) {
+  // 20 products at a time (fewer choices at once = easier decisions, faster on mobile data), then "show more"
+  const PAGE = 20;
+  async function loadGrid(params, append) {
     const g = $('#grid'); if (!g) return;
-    const qs = new URLSearchParams({ ...params, sort: S.sort, limit: 60 }).toString();
+    if (!append) { S.gridParams = params || {}; S.gridOffset = 0; }
+    const qs = new URLSearchParams({ ...S.gridParams, sort: S.sort, limit: PAGE + 1, offset: S.gridOffset }).toString();
     try {
       const list = await api(`/products?${qs}`);
       if (!$('#grid')) return;
-      $('#grid').innerHTML = list.length ? `<div class="grid">${list.map(productCard).join('')}</div>`
-        : `<div class="empty"><div class="ic sq">${I.search}</div><h3>${T('noResults')}</h3></div>`;
+      const more = list.length > PAGE; const items = list.slice(0, PAGE);
+      S.gridOffset += items.length;
+      const filtered = S.filters && Object.keys(S.filters).length;
+      if (!append) {
+        $('#grid').innerHTML = items.length ? '<div class="grid" id="gridInner"></div><div id="moreWrap"></div>'
+          : `<div class="empty"><div class="ic sq">${I.search}</div><h3>${T(filtered ? 'fNone' : 'noResults')}</h3>${filtered ? `<button class="btn btn-soft" id="fClearEmpty">${T('fClear')}</button>` : ''}</div>`;
+        if ($('#fClearEmpty')) $('#fClearEmpty').onclick = () => { S.filters = {}; drawFilterCount(); loadGrid({ ...S.filterBase }); };
+      }
+      if (!items.length) return;
+      $('#gridInner').insertAdjacentHTML('beforeend', items.map(productCard).join(''));
+      $('#moreWrap').innerHTML = more ? `<button class="btn btn-soft btn-block more-btn" id="moreBtn">${T('showMore')}</button>` : '';
+      if (more) $('#moreBtn').onclick = (e) => { e.currentTarget.disabled = true; loadGrid(null, true); };
     } catch { g.innerHTML = `<div class="empty"><h3>${T('err_generic')}</h3></div>`; }
+  }
+
+  // ---------------- filters (category & search pages) ----------------
+  const filterRow = () => `<div class="sort-row"><button class="filter-btn" id="filterBtn">${I.sliders}<span>${T('filterBtn')}</span><b class="num hidden" id="fCount"></b></button><div class="sort-tabs" id="sortTabs"></div></div>`;
+  function drawFilterCount() {
+    const n = Object.keys(S.filters || {}).filter((k) => k !== 'max_price' || !S.filters.min_price).length;
+    const b = $('#fCount'); if (!b) return;
+    b.textContent = n; b.classList.toggle('hidden', !n);
+  }
+  function bindFilters(base) {
+    S.filters = {}; S.filterBase = base;
+    const run = () => loadGrid({ ...base, ...S.filters });
+    renderSortTabs(run);
+    $('#filterBtn').onclick = async () => {
+      const f = await api(`/products/facets?${new URLSearchParams(base)}`).catch(() => null);
+      if (!f) return;
+      const cur = { ...S.filters };
+      const brands = new Set(String(cur.brand || '').split(',').filter(Boolean));
+      // price buckets that make sense for this list (phones vs accessories)
+      const cuts = f.max > 400000 ? [300000, 600000, 1000000] : [25000, 50000, 100000];
+      const buckets = [[0, cuts[0]], [cuts[0], cuts[1]], [cuts[1], cuts[2]], [cuts[2], 0]].filter(([a, b]) => (!b || b >= f.min) && a <= f.max);
+      const lbl = ([a, b]) => (!a ? `≤ ${fmt(b)}` : !b ? `${fmt(a)}+` : `${fmt(a)} – ${fmt(b)}`);
+      const el = openSheet(`<div class="sheet-head"><h3><span class="hic">${I.sliders}</span>${T('filterBtn')}</h3><button class="close-btn" data-close>${I.close}</button></div>
+        <div class="f-body">
+          ${f.brands.length > 1 ? `<div class="f-lbl">${T('fBrand')}</div><div class="f-chips">${f.brands.map((b) => `<button type="button" class="chip ${brands.has(b.v.toLowerCase()) ? 'active' : ''}" data-fb="${esc(b.v.toLowerCase())}">${esc(b.v)} <small class="num">${b.n}</small></button>`).join('')}</div>` : ''}
+          <div class="f-lbl">${T('fPrice')} <small>(${T('currency')})</small></div>
+          <div class="f-chips">${buckets.map((r) => `<button type="button" class="chip num ${Number(cur.min_price || 0) === r[0] && Number(cur.max_price || 0) === r[1] ? 'active' : ''}" data-fp="${r[0]}-${r[1]}">${lbl(r)}</button>`).join('')}</div>
+          <div class="f-range"><input class="input num" type="number" inputmode="numeric" min="0" id="fMin" placeholder="${esc(T('fMin'))}" value="${esc(cur.min_price || '')}"><span>—</span><input class="input num" type="number" inputmode="numeric" min="0" id="fMax" placeholder="${esc(T('fMax'))}" value="${esc(cur.max_price || '')}"></div>
+          ${f.storages.length > 1 ? `<div class="f-lbl">${T('fStorage')}</div><div class="f-chips">${f.storages.map((x) => `<button type="button" class="chip num ${String(cur.storage) === String(x.v) ? 'active' : ''}" data-fs="${esc(x.v)}">${Number(x.v) >= 1024 ? `${Number(x.v) / 1024}TB` : `${esc(x.v)}GB`}</button>`).join('')}</div>` : ''}
+          <label class="check ${cur.in_stock ? 'on' : ''}" id="fStockLbl"><input type="checkbox" id="fStock" ${cur.in_stock ? 'checked' : ''}> ${T('fInStock')}</label>
+        </div>
+        <div class="f-foot"><button type="button" class="btn btn-soft" id="fClear">${T('fClear')}</button><button type="button" class="btn btn-primary" id="fApply">${T('fApply')}</button></div>`);
+      el.onclick = (e) => {
+        const b = e.target.closest('[data-fb],[data-fp],[data-fs]'); if (!b) return;
+        if (b.dataset.fb) b.classList.toggle('active');
+        if (b.dataset.fp) {
+          const on = !b.classList.contains('active');
+          el.querySelectorAll('[data-fp]').forEach((x) => x.classList.remove('active'));
+          b.classList.toggle('active', on);
+          const [a, z] = b.dataset.fp.split('-').map(Number);
+          $('#fMin').value = on && a ? a : ''; $('#fMax').value = on && z ? z : '';
+        }
+        if (b.dataset.fs) { const on = !b.classList.contains('active'); el.querySelectorAll('[data-fs]').forEach((x) => x.classList.remove('active')); b.classList.toggle('active', on); }
+      };
+      $('#fStock').onchange = (e) => $('#fStockLbl').classList.toggle('on', e.target.checked);
+      $('#fClear').onclick = () => { S.filters = {}; drawFilterCount(); closePanels(); run(); };
+      $('#fApply').onclick = () => {
+        const nf = {};
+        const bs = [...el.querySelectorAll('[data-fb].active')].map((x) => x.dataset.fb);
+        if (bs.length) nf.brand = bs.join(',');
+        const mn = Number($('#fMin').value) || 0; const mx = Number($('#fMax').value) || 0;
+        if (mn > 0) nf.min_price = mn;
+        if (mx > 0) nf.max_price = mx;
+        const st = el.querySelector('[data-fs].active'); if (st) nf.storage = st.dataset.fs;
+        if ($('#fStock').checked) nf.in_stock = '1';
+        S.filters = nf; drawFilterCount(); closePanels(); run();
+      };
+    };
+    run();
   }
 
   function renderSlider(banners) {
@@ -491,6 +588,15 @@
     tick(); countdownTimer = setInterval(tick, 1000);
   }
 
+  async function renderSeen() {
+    const ids = store.get('seen', []).filter((x) => Number.isInteger(x)).slice(0, 10);
+    const el = $('#seenRow'); if (!el || !ids.length) return;
+    const list = await api(`/products?ids=${ids.join(',')}&limit=10`).catch(() => []);
+    if (!list.length || !document.body.contains(el)) return;
+    el.innerHTML = `<div class="section-title">${T('seenBefore')}</div><div class="mini-row">${list.map((p) => { productCache.set(p.id, p); return `
+      <a class="mini-item" href="#/product/${p.id}"><img src="${img(p.image)}" alt="" loading="lazy"><div class="nm">${bidiName(L(p, 'name'))}</div>${money(p.price)}</a>`; }).join('')}</div>`;
+  }
+
   function findCat(id) {
     for (const c of S.categories) { if (c.id === id) return { cat: c, parent: null }; for (const s of c.children) if (s.id === id) return { cat: s, parent: c }; }
     return null;
@@ -505,18 +611,16 @@
           <a href="#/category/${top.id}"><button class="${top.id === id ? 'active' : ''}">${T('all')}</button></a>
           ${top.children.map((s) => `<a href="#/category/${s.id}"><button class="${s.id === id ? 'active' : ''}">${esc(L(s, 'name'))}</button></a>`).join('')}
         </div>` : '<div style="height:16px"></div>'}
-        <div class="sort-tabs" id="sortTabs"></div>
+        ${filterRow()}
         <div id="grid">${gridSkeleton()}</div>
       </div>`;
-    renderSortTabs(() => loadGrid({ category: id }));
-    loadGrid({ category: id });
+    bindFilters({ category: id });
   }
 
   async function viewSearch(q) {
     app.innerHTML = `${pageHead(esc(T('resultsFor', { x: q })))}
-      <div class="container" style="padding-top:16px"><div class="sort-tabs" id="sortTabs"></div><div id="grid">${gridSkeleton()}</div></div>`;
-    renderSortTabs(() => loadGrid({ q }));
-    loadGrid({ q });
+      <div class="container" style="padding-top:16px">${filterRow()}<div id="grid">${gridSkeleton()}</div></div>`;
+    bindFilters({ q });
   }
 
   async function viewProduct(id) {
@@ -524,6 +628,13 @@
     let data;
     try { data = await api(`/products/${id}`); } catch { app.innerHTML = `<div class="empty"><h3>${T('noResults')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
     const p = data.product; productCache.set(p.id, p);
+    store.set('seen', [p.id, ...store.get('seen', []).filter((x) => x !== p.id)].slice(0, 12));
+    const isPhone = !!(p.attrs && p.attrs.os);
+    const pct = Math.min(Number(S.settings.bundle_discount_percent) || 0, 50);
+    const bundleItems = isPhone && pct ? (data.bundle || []).filter((b) => !b.has_variants && b.stock > 0 && !(b.attrs && b.attrs.os)).slice(0, 3) : [];
+    const vid = safeUrl(p.video_url);
+    const vidFile = /\.(mp4|webm)(\?|$)/i.test(vid);
+    const pr = data.proof || {};
     const variants = p.variants || [];
     let variant = variants.find((v) => v.stock > 0) || variants[0] || null;
     const gallery = [p.image, ...(p.images || [])].filter(Boolean);
@@ -535,33 +646,47 @@
             <div class="main"><span class="tag off end hidden" id="offTag"></span>
               <div class="swipe" id="swipe">${gallery.map((g, i) => `<img src="${img(g)}" alt="${esc(L(p, 'name'))}" ${i ? 'loading="lazy"' : ''} decoding="async">`).join('')}</div>
               ${gallery.length > 1 ? `<div class="swipe-dots">${gallery.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}</div>
+            ${vid && vidFile ? `<video class="pd-video" src="${esc(vid)}" controls preload="none" playsinline></video>` : ''}
+            ${vid && !vidFile ? `<a class="video-btn" href="${esc(vid)}" target="_blank" rel="noopener">${I.play}<span>${T('watchVideo')}</span></a>` : ''}
             ${gallery.length > 1 ? `<div class="thumbs">${gallery.map((g, i) => `<button class="${i === 0 ? 'active' : ''}" data-img="${img(g)}"><img src="${img(g)}" alt=""></button>`).join('')}</div>` : ''}
           </div>
           <div class="card pd-info">
             ${p.brand ? `<div class="brand">${esc(p.brand)}</div>` : ''}
             ${(p.tags || []).length ? `<div class="ptags">${p.tags.map((t) => `<span class="ptag" style="background:${esc(t.color)}1f;color:${esc(t.color)}">${esc(L(t, 'name'))}</span>`).join('')}</div>` : ''}
             <h1>${bidiName(L(p, 'name'))}</h1>
+            ${p.rating_count ? `<button class="pd-rate" id="jumpRev">${stars(p.rating_avg)}<b class="num">${Number(p.rating_avg).toFixed(1)}</b><span>${esc(T('reviewsN', { x: p.rating_count }))}</span></button>` : ''}
             <div class="prices" id="pdPrice"></div>
             <div class="usd-approx" id="pdUsd"></div>
             <div class="deliv-line">${I.truck}<span>${T('deliveryLine')}${Number(S.settings.free_delivery_over) ? ` · ${esc(T('freeOverLine', { x: `${fmt(S.settings.free_delivery_over)} ${T('currency')}` }))}` : ''}</span></div>
-            ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${variants.map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}</button>`).join('')}</div>` : ''}
+            ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${[...variants].sort((a, b) => b.price - a.price).map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}<small class="num">${fmt(v.price)}</small></button>`).join('')}</div>` : ''}
             <div class="stock" id="pdStock"></div>
+            ${pr.viewers >= 2 || pr.sold30 >= 3 ? `<div class="pd-live">${pr.viewers >= 2 ? `<span><i class="dot-live"></i>${esc(T('viewersNow', { x: pr.viewers }))}</span>` : ''}${pr.sold30 >= 3 ? `<span>${I.fire}${esc(T('soldMonth', { x: pr.sold30 }))}</span>` : ''}</div>` : ''}
             ${p.attrs && p.attrs.os && S.settings.proof_enabled === '1' ? `<div class="proof"><b>${I.shield}${T('proofTitle')}</b><ul>
               <li>${T('proof1')}</li><li>${T('proof2')}</li><li>${T('proof3')}</li>${S.settings.warranty_text ? `<li>${esc(S.settings.warranty_text)}</li>` : ''}</ul></div>` : ''}
             <div class="pd-actions">
               <div class="qty" id="qtyBox"><button id="qMinus">${I.minus}</button><span id="qVal" class="num">1</span><button id="qPlus">${I.plus}</button></div>
               <button class="btn btn-primary" id="addBtn">${I.basket}${T('addToCart')}</button>
             </div>
+            ${Number(S.settings.exchange_days) > 0 ? `<div class="xchg-note">${I.check}<span>${esc(T('exchangeNote', { x: S.settings.exchange_days }))}</span></div>` : ''}
             <a class="btn btn-wa btn-block hidden" id="askStock" target="_blank" rel="noopener">${I.whatsapp}${T('askStock')}</a>
             ${p.attrs && p.attrs.os && S.settings.tradein_enabled === '1' ? `<a class="ti-hint" href="#/tradein">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}
-            <button class="share-mini" id="shareBtn" aria-label="${esc(T('share'))}">${I.share}${T('share')}</button>
+            <div class="pd-minis"><button class="share-mini" id="shareBtn" aria-label="${esc(T('share'))}">${I.share}${T('share')}</button>
+              ${isPhone ? `<button class="share-mini" id="cmpBtn">${I.scale}${T('compareWith')}</button>` : ''}</div>
             ${trustStrip()}
             <div class="cashback-note hidden" id="pdCashback"></div>
             ${(p.specs || []).length ? `<div class="pd-desc"><h3>${T('specs')}</h3><table class="specs">${p.specs.map((x) => `<tr><th>${esc(x.k)}</th><td dir="auto">${esc(x.v)}</td></tr>`).join('')}</table></div>` : ''}
             ${L(p, 'desc') ? `<div class="pd-desc"><h3>${T('description')}</h3><p>${esc(L(p, 'desc'))}</p></div>` : ''}
           </div>
         </div>
+        ${bundleItems.length ? `<section class="card bundle-box">
+          <h3>${I.gift}${T('bundleTitle')}</h3><p>${esc(T('bundleNote', { x: pct }))}</p>
+          <div class="bx-items"><div class="bx-item main"><img src="${img(p.image)}" alt=""><span>${T('thisItem')}</span></div>
+            ${bundleItems.map((b) => `<span class="bx-plus">+</span><label class="bx-item"><input type="checkbox" data-bx="${b.id}" checked><img src="${img(b.image)}" alt=""><span>${bidiName(L(b, 'name'))}</span>
+              <small><s class="num">${fmt(b.price)}</s> <b class="num">${fmt(b.price - Math.floor((b.price * pct) / 100))}</b></small></label>`).join('')}</div>
+          <div class="bx-foot"><div><div id="bxTotal"></div><div class="bx-save" id="bxSave"></div></div><button class="btn btn-primary" id="bxAdd">${I.basket}${T('bundleAdd')}</button></div>
+        </section>` : ''}
         ${(data.bundle || []).length ? `<div class="section-title">${T('boughtTogether')}</div><div class="grid">${data.bundle.map(productCard).join('')}</div>` : ''}
+        ${S.settings.reviews_enabled !== '0' ? '<section class="card reviews-sec" id="reviewsSec"></section>' : ''}
         ${data.related.length ? `<div class="section-title">${T('related')}</div><div class="grid">${data.related.map(productCard).join('')}</div>` : ''}
       </div>`;
     S.bundle = { forId: p.id, items: data.bundle || [] };
@@ -593,11 +718,32 @@
         ${waNum ? `<a class="bb-wa" target="_blank" rel="noopener" href="https://wa.me/${waNum}?text=${encodeURIComponent(T('waProductMsg', { x: S.waContext }))}" aria-label="WhatsApp">${I.whatsapp}</a>` : ''}
         <button class="btn btn-primary bb-add" ${out ? 'disabled' : ''}>${I.basket}${out ? T('soldOut') : T('addToCart')}</button>`;
       $('#buybar .bb-add').onclick = () => addToCart(p, qty, variant);
+      drawBundle();
       $('#qtyBox').classList.toggle('hidden', out);
       qty = Math.max(1, Math.min(qty, stock || 1)); $('#qVal').textContent = qty;
       app.querySelectorAll('[data-variant]').forEach((b) => b.classList.toggle('active', variant && Number(b.dataset.variant) === variant.id));
     };
+    function drawBundle() {
+      if (!$('#bxTotal')) return;
+      const price = variant ? variant.price : p.price;
+      const picked = bundleItems.filter((b) => { const c = app.querySelector(`[data-bx="${b.id}"]`); return c && c.checked; });
+      const full = price + picked.reduce((a, b) => a + b.price, 0);
+      const save = picked.reduce((a, b) => a + Math.floor((b.price * pct) / 100), 0);
+      $('#bxTotal').innerHTML = `${save ? `<span class="old-price num">${fmt(full)}</span> ` : ''}${money(full - save)}`;
+      $('#bxSave').textContent = save ? T('bundleSave', { x: `${fmt(save)} ${T('currency')}` }) : '';
+    }
     render();
+    if ($('#bxAdd')) {
+      app.querySelectorAll('[data-bx]').forEach((c) => c.onchange = drawBundle);
+      $('#bxAdd').onclick = () => {
+        if (!pushCart(p, 1, variant)) return;
+        bundleItems.forEach((b) => { const c = app.querySelector(`[data-bx="${b.id}"]`); if (c && c.checked) pushCart(b, 1, null); });
+        saveCart(); toast(T('bundleAdded')); location.hash = '#/cart';
+      };
+    }
+    if ($('#jumpRev')) $('#jumpRev').onclick = () => { const r = $('#reviewsSec'); if (r) r.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    if ($('#cmpBtn')) $('#cmpBtn').onclick = () => pickPhone([p.id], (id) => { location.hash = `#/compare?ids=${p.id},${id}`; });
+    loadReviews(p);
     app.querySelectorAll('[data-variant]').forEach((b) => b.addEventListener('click', () => { variant = variants.find((v) => v.id === Number(b.dataset.variant)); qty = 1; render(); }));
     const sw = $('#swipe');
     const dots = app.querySelectorAll('.swipe-dots i');
@@ -620,6 +766,131 @@
     };
   }
 
+  // ---------------- reviews ----------------
+  const reviewItem = (x) => `<div class="rv-item">
+      <div class="rv-top"><span class="rv-av">${esc((x.name || '?').charAt(0))}</span>
+        <div class="rv-who"><b>${esc(x.name || '')}</b>${x.city ? `<small> · ${esc(x.city)}</small>` : ''}<div>${stars(x.rating)}${x.verified ? `<span class="rv-ver">${I.check}${T('verifiedBuyer')}</span>` : ''}</div></div>
+        <small class="rv-date num">${esc(String(x.created_at || '').slice(0, 10))}</small></div>
+      ${x.comment ? `<p dir="auto">${esc(x.comment)}</p>` : ''}
+      ${(x.photos || []).length ? `<div class="rv-photos sm">${x.photos.map((u) => `<a href="${img(u)}" target="_blank" rel="noopener"><img src="${img(u)}" alt="" loading="lazy"></a>`).join('')}</div>` : ''}
+      ${x.reply ? `<div class="rv-reply"><b>${T('storeReply')}</b><p dir="auto">${esc(x.reply)}</p></div>` : ''}
+    </div>`;
+  async function loadReviews(p) {
+    const el = $('#reviewsSec'); if (!el) return;
+    let r;
+    try { r = await api(`/products/${p.id}/reviews?limit=5`); } catch { el.remove(); return; }
+    if (!document.body.contains(el)) return;
+    if (r.can_review === 'off') { el.remove(); return; }
+    let offset = r.list.length;
+    const write = r.can_review === 'yes' ? `<button class="btn btn-soft rv-write" id="rvWrite">${I.star}${T(r.mine ? 'editReview' : 'writeReview')}</button>`
+      : r.can_review === 'login' ? `<a class="btn btn-soft rv-write" href="#/quick?next=${encodeURIComponent(`product/${p.id}`)}">${T('reviewLogin')}</a>` : '';
+    el.innerHTML = `<div class="rv-head"><h2>${T('reviewsT')}</h2>${write}</div>
+      ${r.count ? `<div class="rv-sum"><div class="rv-avg"><b class="num">${r.avg.toFixed(1)}</b>${stars(r.avg)}<small>${esc(T('reviewsN', { x: r.count }))}</small></div>
+        <div class="rv-dist">${[5, 4, 3, 2, 1].map((n) => `<div><span class="num">${n}</span>${I.star}<i><b style="width:${(r.dist[n] / r.count) * 100}%"></b></i><span class="num">${r.dist[n]}</span></div>`).join('')}</div></div>
+        ${r.photos.length ? `<div class="rv-lbl">${T('custPhotos')}</div><div class="rv-photos">${r.photos.map((u) => `<a href="${img(u)}" target="_blank" rel="noopener"><img src="${img(u)}" alt="" loading="lazy"></a>`).join('')}</div>` : ''}
+        <div id="rvList">${r.list.map(reviewItem).join('')}</div>
+        ${r.count > offset ? `<button class="btn btn-soft btn-block" id="rvMore">${T('moreReviews')}</button>` : ''}`
+      : `<div class="rv-empty">${I.star}<b>${T('noReviews')}</b><small>${T(r.can_review === 'buy' || r.can_review === 'login' ? 'reviewBuyOnly' : 'noReviewsSub')}</small></div>`}
+      ${r.mine && r.mine.status === 'pending' ? `<p class="rv-note">${T('reviewPending')}</p>` : ''}`;
+    if ($('#rvWrite')) $('#rvWrite').onclick = () => openReviewForm(p.id, r.mine, () => loadReviews(p));
+    if ($('#rvMore')) $('#rvMore').onclick = async (e) => {
+      const btn = e.currentTarget; btn.disabled = true;
+      const more = await api(`/products/${p.id}/reviews?limit=10&offset=${offset}`).catch(() => null);
+      if (!more) { btn.disabled = false; return; }
+      $('#rvList').insertAdjacentHTML('beforeend', more.list.map(reviewItem).join(''));
+      offset += more.list.length;
+      if (offset >= more.count || !more.list.length) btn.remove(); else btn.disabled = false;
+    };
+  }
+  function openReviewForm(pid, mine, done) {
+    let rating = mine ? mine.rating : 0;
+    const photos = mine ? [...(mine.photos || [])] : [];
+    const el = openSheet(`<div class="sheet-head"><h3><span class="hic">${I.star}</span>${T(mine ? 'editReview' : 'writeReview')}</h3><button class="close-btn" data-close>${I.close}</button></div>
+      <div class="rv-form"><div class="f-lbl">${T('yourRating')}</div>
+        <div class="star-pick">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-star="${n}" aria-label="${n}">${I.star}</button>`).join('')}</div>
+        <textarea class="input" id="rvText" rows="4" maxlength="1000" placeholder="${esc(T('reviewPh'))}">${esc(mine ? mine.comment || '' : '')}</textarea>
+        <div class="rv-up" id="rvUp"></div><div id="rvErr"></div>
+        <button type="button" class="btn btn-primary btn-block" id="rvSend">${T('submitReview')}</button></div>`);
+    const drawStars = () => el.querySelectorAll('[data-star]').forEach((b) => b.classList.toggle('on', Number(b.dataset.star) <= rating));
+    const drawPhotos = () => {
+      $('#rvUp').innerHTML = photos.map((u, i) => `<span class="rv-th"><img src="${img(u)}" alt=""><button type="button" data-rmph="${i}" aria-label="${esc(T('delete'))}">${I.close}</button></span>`).join('')
+        + (photos.length < 3 ? `<label class="rv-add">${I.plus}<span>${T('addPhotos')}</span><input type="file" accept="image/*" id="rvFile" hidden></label>` : '');
+      const f = $('#rvFile');
+      if (f) f.onchange = async () => {
+        const file = f.files[0]; if (!file) return;
+        const fd = new FormData(); fd.append('file', file);
+        $('#rvUp').classList.add('busy');
+        try {
+          const res = await fetch('/api/reviews/upload', { method: 'POST', headers: { Authorization: `Bearer ${S.token}` }, body: fd });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) toast(errMsg({ code: d.error })); else photos.push(d.url);
+        } catch { toast(T('err_generic')); }
+        $('#rvUp').classList.remove('busy');
+        drawPhotos();
+      };
+    };
+    drawStars(); drawPhotos();
+    el.onclick = (e) => {
+      const s1 = e.target.closest('[data-star]'); if (s1) { rating = Number(s1.dataset.star); drawStars(); $('#rvErr').innerHTML = ''; return; }
+      const rm = e.target.closest('[data-rmph]'); if (rm) { e.preventDefault(); photos.splice(Number(rm.dataset.rmph), 1); drawPhotos(); }
+    };
+    $('#rvSend').onclick = async () => {
+      if (!rating) { $('#rvErr').innerHTML = `<div class="err">${T('pickStars')}</div>`; return; }
+      const btn = $('#rvSend'); btn.disabled = true;
+      try {
+        const r = await api(`/products/${pid}/reviews`, { method: 'POST', body: { rating, comment: $('#rvText').value, photos } });
+        closePanels(); toast(T(r.status === 'approved' ? 'reviewThanks' : 'reviewPending'));
+        if (done) done();
+      } catch (e) { btn.disabled = false; $('#rvErr').innerHTML = `<div class="err">${esc(errMsg(e))}</div>`; }
+    };
+  }
+
+  // ---------------- compare two phones ----------------
+  async function pickPhone(exclude, onPick) {
+    const list = (await api('/products?phones=1&limit=100').catch(() => [])).filter((x) => !exclude.includes(x.id));
+    const el = openSheet(`<div class="sheet-head"><h3><span class="hic">${I.scale}</span>${T('pickPhone')}</h3><button class="close-btn" data-close>${I.close}</button></div>
+      <div class="pick-list">${list.map((x) => `<button type="button" class="pick-item" data-pick-id="${x.id}"><img src="${img(x.image)}" alt=""><span>${bidiName(L(x, 'name'))}</span>${money(x.price)}</button>`).join('')}</div>`);
+    el.onclick = (e) => { const b = e.target.closest('[data-pick-id]'); if (b) { closePanels(); onPick(Number(b.dataset.pickId)); } };
+  }
+  async function viewCompare(idsParam) {
+    const ids = String(idsParam || '').split(',').map(Number).filter((x) => x > 0).slice(0, 3);
+    app.innerHTML = '<div class="spinner"></div>';
+    const prods = (await Promise.all(ids.map((id) => api(`/products/${id}`).then((d) => d.product).catch(() => null)))).filter(Boolean);
+    if (!prods.length) { location.hash = '#/'; return; }
+    prods.forEach((x) => productCache.set(x.id, x));
+    const a = (x, k) => Number((x.attrs || {})[k]) || 0;
+    const gb = (n) => (n >= 1024 ? `${n / 1024}TB` : `${n}GB`);
+    // [label, value, show, higher-is-better]
+    const rows = [
+      [T('sPrice'), (x) => x.price, (x) => fmt(x.price), false],
+      [T('sStorage'), (x) => a(x, 'storage'), (x) => gb(a(x, 'storage')), true],
+      [T('sRam'), (x) => a(x, 'ram'), (x) => `${a(x, 'ram')}GB`, true],
+      [T('sCamera'), (x) => a(x, 'camera'), (x) => `${a(x, 'camera')}MP`, true],
+      [T('sBattery'), (x) => a(x, 'battery'), (x) => `${fmt(a(x, 'battery'))} mAh`, true],
+      [T('sScreen'), (x) => a(x, 'screen'), (x) => `${a(x, 'screen')}″`, true],
+      [T('sCharging'), (x) => a(x, 'charging'), (x) => `${a(x, 'charging')}W`, true],
+      [T('s5g'), (x) => ((x.attrs || {}).g5 ? 1 : 0), (x) => ((x.attrs || {}).g5 ? '✓' : '—'), true],
+      [T('sRating'), (x) => Number(x.rating_avg) || 0, (x) => (x.rating_count ? `★ ${Number(x.rating_avg).toFixed(1)} (${x.rating_count})` : '—'), true],
+    ];
+    app.innerHTML = `${pageHead(T('compareTitle'))}
+      <div class="container"><div class="card cmp" style="--n:${prods.length}">
+        <div class="cmp-cols">${prods.map((x, i) => `<div class="cmp-col">
+          <a href="#/product/${x.id}"><img src="${img(x.image)}" alt=""></a>
+          <b class="cmp-nm">${bidiName(L(x, 'name'))}</b>${money(x.price)}
+          <button class="add-btn cmp-add" data-add="${x.id}" ${x.stock <= 0 ? 'disabled' : ''} aria-label="${esc(T('addToCart'))}">${I.plus}</button>
+          <button class="share-mini" data-chg="${i}">${I.scale}${T('changeBtn')}</button></div>`).join('')}</div>
+        <table class="cmp-table">${rows.map(([lbl, val, show, hi]) => {
+          const vals = prods.map(val); const best = hi ? Math.max(...vals) : Math.min(...vals);
+          const differ = new Set(vals).size > 1;
+          return `<tr><th colspan="${prods.length}">${esc(lbl)}</th></tr><tr>${prods.map((x, i) => `<td class="num ${differ && vals[i] === best && best ? 'win' : ''}">${esc(show(x))}</td>`).join('')}</tr>`;
+        }).join('')}</table>
+      </div></div>`;
+    app.querySelectorAll('[data-chg]').forEach((b) => b.onclick = () => {
+      const i = Number(b.dataset.chg);
+      pickPhone(prods.map((x) => x.id), (id) => { const nids = prods.map((x) => x.id); nids[i] = id; location.hash = `#/compare?ids=${nids.join(',')}`; });
+    });
+  }
+
   // Delivery zones from settings: [{ name, fee }]
   function zones() {
     try { const z = JSON.parse(S.settings.delivery_zones || '[]'); if (Array.isArray(z) && z.length) return z; } catch { /* fall back */ }
@@ -636,6 +907,7 @@
     if (!S.cart.length) return;
     try {
       const q = await api('/cart/quote', { method: 'POST', body: { items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } });
+      S.bundleOff = q.bundle_discount || 0;
       let removed = false;
       S.cart = S.cart.map((i, idx) => {
         const it = q.items[idx];
@@ -655,7 +927,8 @@
         <div class="empty"><div class="ic">${I.basket}</div><h3>${T('cartEmpty')}</h3><p>${T('cartEmptySub')}</p><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`;
       return;
     }
-    const sub = cartTotal();
+    const bOff = Math.min(S.bundleOff || 0, cartTotal());
+    const sub = cartTotal() - bOff;
     const freeOver = Number(S.settings.free_delivery_over || 0);
     const fees = zones().map((z) => Number(z.fee));
     const minFee = fees.length ? Math.min(...fees) : Number(S.settings.delivery_fee || 0);
@@ -674,7 +947,8 @@
         <div class="card summary cart-summary">
           ${freeOver && sub < freeOver ? `<div class="hint">${esc(T('freeDeliveryHint', { x: `${fmt(freeOver - sub)} ${T('currency')}` }))}<div class="progress"><i style="width:${Math.min(100, (sub / freeOver) * 100)}%"></i></div></div>` : ''}
           ${tradeinBox(sub)}
-          <div class="sum-row"><span>${T('subtotal')}</span>${money(sub)}</div>
+          <div class="sum-row"><span>${T('subtotal')}</span>${money(sub + bOff)}</div>
+          ${bOff ? `<div class="sum-row"><span>${I.gift}${T('bundleOff')}</span><b class="num" style="color:var(--green)">-${fmt(bOff)}</b></div>` : ''}
           ${S.tradein ? `<div class="sum-row"><span>${T('tiCredit')}</span><b class="num" style="color:var(--green)">-${fmt(Math.min(S.tradein.estimate, sub))}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${isFree || !minFee ? `<b style="color:var(--green)">${T('free')}</b>` : `<span>${fees.length > 1 && new Set(fees).size > 1 ? `<small style="color:var(--ink-2)">${T('from')}</small> ` : ''}${money(minFee)}</span>`}</div>
           <div class="sum-row total"><span>${T('total')}</span>${money(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))}</div>
@@ -691,6 +965,8 @@
       if (b.dataset.dec) it.qty = Math.max(1, it.qty - 1);
       if (b.dataset.rm) S.cart = S.cart.filter((x) => cartKey(x) !== key);
       saveCart(); viewCart(true);
+      // the bundle deal depends on what is in the cart → ask the server again
+      if (S.cart.length) refreshCart().then(() => { if (location.hash.startsWith('#/cart')) viewCart(true); }); else S.bundleOff = 0;
     };
   }
 
@@ -711,7 +987,8 @@
     const user = me.user;
     const def = addresses[0] || {};
     const zs = zones();
-    const sub = cartTotal();
+    const bOff = Math.min(S.bundleOff || 0, cartTotal());
+    const sub = cartTotal() - bOff;
     let useWallet = false;
     let coupon = null; // { code, discount }
     let source = null;
@@ -726,7 +1003,8 @@
             ${zs.length > 1 ? `<option value="" ${def.city ? '' : 'selected'} disabled>${T('chooseCity')}</option>` : ''}
             ${zs.map((z) => `<option value="${esc(z.name)}" ${z.name === def.city ? 'selected' : ''}>${esc(z.name)} — ${Number(z.fee) ? `${fmt(z.fee)} ${T('currency')}` : T('free')}${z.eta ? ` · ${esc(z.eta)}` : ''}</option>`).join('')}</select><div class="eta" id="coEta"></div></div>
           <div class="field"><label>${T('address')}</label><input class="input" name="address" value="${esc([def.area, def.details].filter(Boolean).join(' - '))}" required></div>
-          <div class="field"><label>${T('note')}</label><textarea class="input" name="note"></textarea></div>
+          <button type="button" class="link-btn" id="noteToggle">${T('addNote')}</button>
+          <div class="field hidden" id="noteField"><label>${T('note')}</label><textarea class="input" name="note"></textarea></div>
           ${me.stats.orders === 0 ? `<div class="field"><label>${T('heardFrom')} <span style="font-weight:400;color:var(--muted)">(${T('optional')})</span></label>
             <div class="src-chips">${['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'].map((k) => `<button type="button" class="chip" data-src="${k}">${({ tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', snapchat: 'Snapchat', google: 'Google' })[k] || T(`src_${k}`)}</button>`).join('')}</div></div>` : ''}
           <div class="section-title">${T('payment')}</div>
@@ -735,6 +1013,7 @@
         </form>
         <div class="card summary">
           ${S.cart.map((i) => `<div class="sum-row"><span>${esc(L(i, 'name'))}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × <span class="num">${i.qty}</span></span><span class="num">${fmt(i.price * i.qty)}</span></div>`).join('')}
+          ${bOff ? `<div class="sum-row"><span>${T('bundleOff')}</span><span class="num" style="color:var(--green)">-${fmt(bOff)}</span></div>` : ''}
           <div class="coupon-row" id="couponBox">
             <input class="input" id="couponIn" placeholder="${esc(T('coupon'))}" autocomplete="off" style="text-transform:uppercase">
             <button type="button" class="btn btn-soft" id="couponBtn">${T('apply')}</button>
@@ -767,6 +1046,7 @@
     };
     recalc();
     $('#coForm').city.onchange = recalc;
+    $('#noteToggle').onclick = () => { $('#noteToggle').remove(); $('#noteField').classList.remove('hidden'); $('#coForm').note.focus(); };
     app.querySelectorAll('[data-src]').forEach((b) => b.onclick = () => {
       source = source === b.dataset.src ? null : b.dataset.src;
       app.querySelectorAll('[data-src]').forEach((x) => x.classList.toggle('active', x.dataset.src === source));
@@ -1063,6 +1343,7 @@
       <div class="container cart-layout">
         <div>
           ${o.status !== 'cancelled' ? `<div class="card" style="padding:18px 10px;margin-bottom:14px"><div class="timeline">${flow.map(([k, ic], i) => `<div class="step ${i <= idx ? 'done' : ''}"><div class="c">${ic}</div>${T(`st_${k}`)}</div>`).join('')}</div></div>` : ''}
+          <div id="rateBox"></div>
           ${o.items.map((i) => `<div class="card cart-item"><a href="#/product/${i.product_id}"><img src="${img(i.image)}" alt=""></a><div class="info"><div class="nm">${esc(i.name)}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}<span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
         </div>
         <div class="card summary">
@@ -1073,6 +1354,7 @@
           ${o.note ? `<div class="sum-row"><span>${T('note')}</span><b>${esc(o.note)}</b></div>` : ''}
           <div class="sum-row" style="border-top:1px solid var(--line);padding-top:10px"><span>${T('subtotal')}</span>${money(o.subtotal)}</div>
           ${o.tradein ? `<div class="sum-row"><span>${T('tiCredit')}<br><small style="color:var(--muted)">${esc(o.tradein.label)} · ${T(`ti_${o.tradein.status}`)}</small></span><b class="num" style="color:var(--green)">-${fmt(o.tradein_credit)}</b></div>` : ''}
+          ${o.bundle_discount ? `<div class="sum-row"><span>${T('bundleOff')}</span><b class="num" style="color:var(--green)">-${fmt(o.bundle_discount)}</b></div>` : ''}
           ${o.discount ? `<div class="sum-row"><span>${T('discountLbl')} <span class="num">(${esc(o.coupon_code || '')})</span></span><b class="num" style="color:var(--green)">-${fmt(o.discount)}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${o.delivery_fee ? money(o.delivery_fee) : `<b style="color:var(--green)">${T('free')}</b>`}</div>
           ${o.wallet_used ? `<div class="sum-row"><span>${T('walletUsed')}</span><b class="num" style="color:var(--green)">-${fmt(o.wallet_used)}</b></div>` : ''}
@@ -1081,11 +1363,20 @@
           ${o.status === 'pending' ? `<button class="btn btn-danger btn-block" id="cancelBtn" style="margin-top:10px">${T('cancelOrder')}</button>` : ''}
         </div>
       </div>`;
+    if (o.status === 'delivered' && S.settings.reviews_enabled !== '0') drawRateBox(o);
     const cb = $('#cancelBtn');
     if (cb) cb.onclick = async () => {
       if (!confirm(T('confirmCancel'))) return;
       try { await api(`/orders/${o.id}/cancel`, { method: 'POST' }); viewOrder(o.id); } catch (e) { toast(errMsg(e)); }
     };
+  }
+
+  async function drawRateBox(o) {
+    const todo = (await api('/me/to-review').catch(() => [])).filter((x) => o.items.some((i) => i.product_id === x.id));
+    const el = $('#rateBox'); if (!el || !todo.length) { if (el) el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="card rate-box"><b>${I.star}${T('rateBuys')}</b><small>${T('rateBuysSub')}</small>
+      ${todo.map((x) => `<div class="rate-row"><img src="${img(x.image)}" alt=""><span>${bidiName(L(x, 'name'))}</span><button class="btn btn-primary" data-rate="${x.id}">${T('rateNow')}</button></div>`).join('')}</div>`;
+    el.querySelectorAll('[data-rate]').forEach((b) => b.onclick = () => openReviewForm(Number(b.dataset.rate), null, () => drawRateBox(o)));
   }
 
   async function viewAddresses() {
@@ -1555,6 +1846,7 @@
       case 'repair': return viewRepair(qs.get('resume') === '1', qs.get('start') === '1');
       case 'repairs': return viewRepairs(p1);
       case 'warranty': return viewWarranty(p1);
+      case 'compare': return viewCompare(qs.get('ids'));
       default: return viewHome();
     }
   }

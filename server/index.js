@@ -14,6 +14,7 @@ const { normalize, searchClause, relevance } = require('./search');
 const extrasModule = require('./extras');
 const smart = require('./smart');
 const repair = require('./repair');
+const reviews = require('./reviews');
 const { isStaff } = extrasModule;
 let extras = { recordStock: () => {}, pruneAnalytics: () => {} }; // filled in once the admin router exists
 
@@ -29,6 +30,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
+  "media-src 'self' https:",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
@@ -50,7 +52,8 @@ const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancel
 const ORDER_SOURCES = ['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
   'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text',
-  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled', 'repair_enabled', 'proof_enabled'];
+  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled', 'repair_enabled', 'proof_enabled',
+  'reviews_enabled', 'reviews_buyers_only', 'bundle_discount_percent', 'store_hours'];
 const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_round', 'min_profit',
   'repair_pickup', 'repair_pickup_fee', 'repair_free_diagnosis', 'repair_honest_pct', 'repair_open', 'repair_close', 'repair_closed_days', 'repair_slot_capacity'];
 // Secret admin address, e.g. ADMIN_PATH=/the-gate (default /admin).
@@ -157,7 +160,7 @@ app.use('/api', auth);
 
 // Rate limiting stored in the database, so it survives restarts. Keys look like "ip:1.2.3.4" or "phone:0750...".
 const WINDOW_MS = 15 * 60 * 1000;
-const LIMITS = { ip: 30, phone: 8, coupon: 15 };
+const LIMITS = { ip: 30, phone: 8, coupon: 15, revup: 12 };
 function failures(key) { return db.prepare('SELECT COUNT(*) n FROM auth_failures WHERE key = ? AND ts > ?').get(key, Date.now() - WINDOW_MS).n; }
 function checkLimit(keys) {
   for (const k of keys) if (failures(k) >= LIMITS[k.split(':')[0]]) throw new HttpError(429, 'too_many_attempts');
@@ -327,6 +330,20 @@ function productQuery(q, { admin = false } = {}) {
     if (c) { where.push(`(${c.sql})`); params.push(...c.params); searchTokens = c.tokens; }
   }
   if (q.flash) where.push('p.flash_sale = 1');
+  // filters (category / search pages) and "recently viewed" ids
+  if (q.ids) {
+    const ids = String(q.ids).split(',').map((x) => int(x)).filter((x) => x > 0).slice(0, 30);
+    where.push(ids.length ? `p.id IN (${ids.map(() => '?').join(',')})` : '0'); params.push(...ids);
+  }
+  if (q.brand) {
+    const brands = String(q.brand).split(',').map((x) => str(x, 60)).filter(Boolean).slice(0, 20);
+    if (brands.length) { where.push(`LOWER(p.brand) IN (${brands.map(() => '?').join(',')})`); params.push(...brands.map((b) => b.toLowerCase())); }
+  }
+  if (int(q.min_price, 0) > 0) { where.push('p.price >= ?'); params.push(int(q.min_price)); }
+  if (int(q.max_price, 0) > 0) { where.push('p.price <= ?'); params.push(int(q.max_price)); }
+  if (int(q.storage, 0) > 0) { where.push("json_extract(p.attrs, '$.storage') = ?"); params.push(int(q.storage)); }
+  if (q.in_stock === '1') where.push('p.stock > 0');
+  if (q.phones === '1') where.push("json_extract(p.attrs, '$.os') IS NOT NULL");
   if (q.featured) where.push('p.featured = 1');
   const sorts = {
     foryou: 'p.featured DESC, p.trending DESC, (p.stock > 0) DESC, p.id DESC',
@@ -346,10 +363,22 @@ function productQuery(q, { admin = false } = {}) {
     rows.sort((a, b) => b._rel - a._rel || a._i - b._i);
     rows.forEach((r) => { delete r._rel; delete r._i; });
   }
+  if (q.ids) { const order = String(q.ids).split(',').map((x) => int(x)); rows.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)); }
   return rows.map((p) => productOut(p, admin));
 }
 
 app.get('/api/products', wrap((req, res) => res.json(productQuery(req.query))));
+// Filter options for a category / search: brands, price range, storage sizes (only values that exist)
+app.get('/api/products/facets', wrap((req, res) => {
+  const rows = productQuery({ category: req.query.category, q: req.query.q, limit: 200 });
+  const count = (arr) => Object.entries(arr.reduce((m, x) => { if (x) m[x] = (m[x] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ v: k, n }));
+  res.json({
+    brands: count(rows.map((p) => p.brand && p.brand.trim())),
+    storages: count(rows.map((p) => p.attrs && p.attrs.storage)).sort((a, b) => Number(a.v) - Number(b.v)),
+    min: rows.length ? Math.min(...rows.map((p) => p.price)) : 0,
+    max: rows.length ? Math.max(...rows.map((p) => p.price)) : 0,
+  });
+}));
 
 app.get('/api/products/:id', wrap((req, res) => {
   const p = db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.id = ? AND p.active = 1`).get(int(req.params.id));
@@ -359,7 +388,11 @@ app.get('/api/products/:id', wrap((req, res) => {
   const product = productOut(p);
   product.variants = variantsOf(p.id).map(publicVariant);
   product.tags = tagsOf(p.id);
-  res.json({ product, related, bundle: boughtTogether(p) });
+  // Real numbers only: people who opened this product in the last 15 minutes, units sold in the last 30 days
+  const viewers = db.prepare('SELECT COUNT(DISTINCT visitor) n FROM page_views WHERE product_id = ? AND created_at > ?').get(p.id, Date.now() - 15 * 60 * 1000).n;
+  const sold30 = db.prepare(`SELECT COALESCE(SUM(oi.qty), 0) n FROM order_items oi JOIN orders o ON o.id = oi.order_id
+    WHERE oi.product_id = ? AND o.status != 'cancelled' AND o.created_at >= datetime('now', '-30 days')`).get(p.id).n;
+  res.json({ product, related, bundle: boughtTogether(p), proof: { viewers, sold30 } });
 }));
 
 // "Frequently bought together": products the admin picked, else what other customers bought with it, else popular accessories.
@@ -391,11 +424,28 @@ function compatibleWith(phone, acc) {
   return true;
 }
 
+// Bundle deal: accessories bought together with a phone they fit get bundle_discount_percent off (one per phone).
+function bundleDiscount(lines, s = getSettings()) {
+  const pct = Math.min(Math.max(Number(s.bundle_discount_percent) || 0, 0), 50);
+  if (!pct) return 0;
+  const isPh = (p) => !!parseJson(p.attrs || '{}', {}).os;
+  const phones = lines.filter((l) => isPh(l.p));
+  const nPhones = phones.reduce((a, l) => a + l.qty, 0);
+  if (!nPhones) return 0;
+  let off = 0;
+  for (const l of lines) {
+    if (isPh(l.p) || !phones.some((ph) => compatibleWith(ph.p, l.p))) continue;
+    off += Math.floor((l.price * Math.min(l.qty, nPhones) * pct) / 100);
+  }
+  return off;
+}
+const linesFromPriced = (items) => items.filter((it) => it.available).map((it) => ({ p: db.prepare('SELECT * FROM products WHERE id = ?').get(it.id), price: it.price, qty: it.qty }));
+
 function boughtTogether(p) {
   const isPhone = parseJson(p.attrs || '{}', {}).os;
   const fits = (x) => !isPhone || compatibleWith(p, x);
   const pick = (ids) => ids.length ? db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.stock > 0 AND p.id IN (${ids.map(() => '?').join(',')})`).all(...ids) : [];
-  let list = pick(parseJson(p.bundle_ids || '[]', []).map((x) => int(x)).filter(Boolean).slice(0, 4));
+  let list = pick(parseJson(p.bundle_ids || '[]', []).map((x) => int(x)).filter(Boolean).slice(0, 4)).filter(fits);
   if (list.length < 3) {
     const co = db.prepare(`SELECT oi2.product_id id, COUNT(*) n FROM order_items oi1 JOIN order_items oi2 ON oi2.order_id = oi1.order_id AND oi2.product_id != oi1.product_id
       WHERE oi1.product_id = ? GROUP BY oi2.product_id ORDER BY n DESC LIMIT 6`).all(p.id).map((r) => r.id);
@@ -522,7 +572,7 @@ app.post('/api/coupons/check', wrap((req, res) => {
   const keys = [`coupon:${req.ip}`];
   checkLimit(keys); // stops guessing codes: 15 wrong codes per 15 minutes
   const items = priceItems(req.body.items);
-  const subtotal = items.reduce((a, it) => a + (it.available ? it.price * it.qty : 0), 0);
+  const subtotal = items.reduce((a, it) => a + (it.available ? it.price * it.qty : 0), 0) - bundleDiscount(linesFromPriced(items));
   let result;
   try { result = evaluateCoupon(req.body.code, req.user && req.user.id, subtotal); }
   catch (e) { if (e.code === 'coupon_invalid') recordFailure(keys); throw e; }
@@ -535,9 +585,10 @@ app.post('/api/cart/quote', wrap((req, res) => {
   const s = getSettings();
   const items = priceItems(req.body.items);
   const subtotal = items.reduce((a, it) => a + (it.available ? it.price * it.qty : 0), 0);
+  const bundle = bundleDiscount(linesFromPriced(items), s);
   let delivery = null;
-  try { delivery = deliveryFor(str(req.body.city, 60), subtotal, s); } catch { delivery = null; }
-  res.json({ items, subtotal, delivery });
+  try { delivery = deliveryFor(str(req.body.city, 60), subtotal - bundle, s); } catch { delivery = null; }
+  res.json({ items, subtotal, bundle_discount: bundle, delivery });
 }));
 
 app.post('/api/orders', requireUser, wrap((req, res) => {
@@ -581,6 +632,8 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
       subtotal += price * qty;
       lines.push({ p, qty, price, variant });
     }
+    const bundleOff = bundleDiscount(lines, s);
+    subtotal -= bundleOff; // coupon, delivery and trade-in all work on the bundle price
     let discount = 0; let couponCode = null;
     if (req.body.coupon) {
       const c = evaluateCoupon(req.body.coupon, req.user.id, subtotal);
@@ -601,8 +654,9 @@ app.post('/api/orders', requireUser, wrap((req, res) => {
     const total = subtotal - discount - tradeinCredit + delivery - walletUsed;
     const source = ORDER_SOURCES.includes(req.body.source) ? req.body.source : null;
     const utm = str(req.body.utm, 100).replace(/[^\w\-.:/ ]/g, '') || null;
-    const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total, discount, coupon_code, source, utm)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, name, phone, city, address, str(req.body.note, 500), subtotal, delivery, walletUsed, total, discount, couponCode, source, utm).lastInsertRowid);
+    // stored subtotal = item prices before the bundle deal; bundle_discount shown as its own line
+    const oid = Number(db.prepare(`INSERT INTO orders(user_id, customer_name, phone, city, address, note, subtotal, delivery_fee, wallet_used, total, discount, coupon_code, source, utm, bundle_discount)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, name, phone, city, address, str(req.body.note, 500), subtotal + bundleOff, delivery, walletUsed, total, discount, couponCode, source, utm, bundleOff).lastInsertRowid);
     const insItem = db.prepare('INSERT INTO order_items(order_id, product_id, variant_id, variant_label, name, image, price, qty, cost) VALUES(?,?,?,?,?,?,?,?,?)');
     for (const { p, qty, price, variant } of lines) {
       const cost = variant && variant.cost_price != null ? variant.cost_price : p.cost_price; // snapshot for profit reports
@@ -668,6 +722,7 @@ admin.use(requireAdmin);
 extras = extrasModule.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, requireUser, getSettings, setSetting, priceItems, repriceUsd, syncProductFromVariants });
 smart.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, getSettings, setSetting, productOut, variantsOf, publicVariant });
 repair.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, requireUser, getSettings, notify, escHtml, PUBLIC_URL });
+reviews.register(app, admin, { db, wrap, HttpError, int, str, requireUser, getSettings, logAdmin });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -689,6 +744,17 @@ function looksLikeImage(file) {
     || b.subarray(0, 4).toString('latin1') === 'GIF8'
     || (b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP');
 }
+// Customers: photos for a review (max 12 per 15 minutes per account; checked, re-encoded, metadata stripped)
+app.post('/api/reviews/upload', requireUser, (req, res, next) => {
+  try { checkLimit([`revup:${req.user.id}`]); recordFailure([`revup:${req.user.id}`]); } catch (e) { return next(e); }
+  next();
+}, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'invalid_file' });
+  if (!looksLikeImage(req.file.path)) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: 'invalid_file' }); }
+  processUpload(req.file.path, UPLOAD_DIR)
+    .then((url) => res.json({ url }))
+    .catch(() => res.status(400).json({ error: 'invalid_file' }));
+});
 admin.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'invalid_file' });
   if (!looksLikeImage(req.file.path)) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: 'invalid_file' }); }
@@ -776,7 +842,7 @@ admin.put('/orders/:id', wrap((req, res) => {
 
 // products
 admin.get('/products', wrap((req, res) => res.json(adminDecorate(attachVariants(productQuery({ ...req.query, sort: req.query.sort || 'newest', limit: 200 }, { admin: true }))))));
-const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids', 'attrs'];
+const PRODUCT_FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images', 'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids', 'attrs', 'video_url'];
 function productValues(b) {
   const v = {
     category_id: b.category_id ? int(b.category_id) : null,
@@ -792,6 +858,8 @@ function productValues(b) {
     specs: JSON.stringify((Array.isArray(b.specs) ? b.specs : []).slice(0, 30).map((x) => ({ k: str(x && x.k, 60), v: str(x && x.v, 200) })).filter((x) => x.k && x.v)),
     bundle_ids: JSON.stringify((Array.isArray(b.bundle_ids) ? b.bundle_ids : []).map((x) => int(x)).filter((x) => x > 0).slice(0, 4)),
     attrs: JSON.stringify(cleanAttrs(b.attrs)),
+    // product video: an https link (YouTube / TikTok / Instagram / .mp4) or our own upload
+    video_url: /^(https:\/\/[^\s"'<>]+|\/uploads\/[\w.-]+)$/.test(str(b.video_url, 500)) ? str(b.video_url, 500) : null,
   };
   v.tag_ids = (Array.isArray(b.tag_ids) ? b.tag_ids : []).map((x) => int(x)).filter((x) => x > 0).slice(0, 10);
   // USD-priced products: the admin types prices in dollars; IQD prices are calculated from the rate.
