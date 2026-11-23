@@ -495,7 +495,7 @@ function bannerSvg(c1, c2, kind) {
 seed();
 for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
   slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',
-  repair_enabled: '1', repair_pickup: '1', repair_pickup_fee: '5000', repair_free_diagnosis: '1', repair_honest_pct: '50',
+  repair_enabled: '1', repair_pickup: '1', repair_pickup_fee: '0', repair_free_diagnosis: '1', repair_honest_pct: '50',
   repair_open: '10', repair_close: '21', repair_closed_days: '5', repair_slot_capacity: '2',
   tradein_enabled: '1',
   tradein_rules: JSON.stringify({ screen: { perfect: 0, scratches: 10, cracked: 35 }, body: { perfect: 0, scratches: 8, damaged: 20 }, battery: { good: 0, ok: 8, weak: 15 }, works: { yes: 0, no: 30 }, box: { yes: 0, no: 3 } }),

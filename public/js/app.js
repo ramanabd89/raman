@@ -372,9 +372,9 @@
             <circle class="ra-spark" cx="70" cy="40" r="5" fill="#F0904A"/></svg>
           <div class="ra-body">
             <span class="ra-tag">${I.wrench}${T('repairTitle')}</span>
-            <div class="ra-hooks" aria-live="polite">${[1, 2, 3, 4].map((n, i) => `<div class="ra-hook ${i === 0 ? 'on' : ''}" data-hook="${n}"><b>${T(`hk${n}q`)}</b><span>${T(`hk${n}a`)}</span></div>`).join('')}</div>
-            <div class="ra-dots">${[0, 1, 2, 3].map((i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
-            <div class="ra-chips"><span>${I.shield}${T('chipWarranty')}</span><span>${I.swap}${T('chipOld')}</span><span id="raFree">${I.check}${T('chipPrice')}</span></div>
+            <div class="ra-hooks" aria-live="polite">${[1, 2, 3, 4, 5].map((n, i) => `<div class="ra-hook ${i === 0 ? 'on' : ''}" data-hook="${n}"><b>${T(`hk${n}q`)}</b><span>${T(`hk${n}a`)}</span></div>`).join('')}</div>
+            <div class="ra-dots">${[0, 1, 2, 3, 4].map((i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
+            <div class="ra-chips"><span>${I.shield}${T('chipWarranty')}</span><span>${I.swap}${T('chipOld')}</span><span id="raFree">${I.check}${T('chipPrice')}</span><span id="raPick" hidden>${I.truck}${T('chipPickup')}</span></div>
             <div class="ra-from" id="raFrom"></div>
             <a class="btn btn-primary ra-cta" href="#/repair?start=1">${I.wrench}${T('repairHomeCta')}</a>
             <div class="rh-svcs">${[['screen', '📱'], ['battery', '🔋'], ['charging', '🔌'], ['back', '🪟'], ['water', '💧']].map(([k, ic]) => `<a href="#/repair?start=1"><span>${ic}</span>${T(`rh_${k}`)}</a>`).join('')}</div>
@@ -402,6 +402,12 @@
     if (cat && cat.from_price) $('#raFrom').innerHTML = `${esc(T('fromPrice', { x: '' }))} ${money(cat.from_price)}`;
     if (cat && cat.free_diagnosis) $('#raFree').innerHTML = `${I.check}${T('chipFree')}`;
     else ad.querySelector('[data-hook="3"] span').textContent = T('hk3b');
+    // pickup hook: "we collect it from your home" (free when the fee is 0); removed when pickup is off
+    const h5 = ad.querySelector('[data-hook="5"]');
+    if (cat && cat.pickup) {
+      if (cat.pickup_fee) h5.querySelector('span').textContent = T('hk5b');
+      else $('#raPick').hidden = false;
+    } else { h5.remove(); ad.querySelector('.ra-dots i:last-child').remove(); }
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const hooks = ad.querySelectorAll('.ra-hook'); const dots = ad.querySelectorAll('.ra-dots i');
     let i = 0;
@@ -1139,6 +1145,7 @@
     const svcName = (sv) => L(sv, 'name');
     const intro = () => {
       const promises = [['p_price', I.money], ['p_approval', I.check], ['p_oldpart', I.swap], ['p_warranty', I.shield], ['p_free', I.gift], ['p_front', I.clock]];
+      if (cat.pickup && !cat.pickup_fee) promises.splice(1, 0, ['p_pickup', I.truck]);
       app.innerHTML = `${pageHead(T('repairTitle'))}<div class="container wizard">
         <div class="repair-hero"><div class="rh-ic">${I.wrench}</div><h2>${T('repairTitle')}</h2><p>${T('repairSub')}</p>
           <button class="btn btn-primary" id="startR">${T('repairStart')}</button></div>
@@ -1192,7 +1199,7 @@
       const dayLbl = (d) => { const x = new Date(`${d}T12:00:00Z`); return `<b>${x.toLocaleDateString(loc, { weekday: 'short', timeZone: 'UTC' })}</b><small class="num">${d.slice(8)}/${d.slice(5, 7)}</small>`; };
       app.innerHTML = shell(T('rMethod'), `
         <div class="wz-options"><button class="wz-opt ${st.method === 'walkin' ? 'on' : ''}" data-meth="walkin">🏪 ${T('walkin')}</button>
-          ${cat.pickup ? `<button class="wz-opt ${st.method === 'pickup' ? 'on' : ''}" data-meth="pickup">🚗 ${T('pickup')}<br><small>${esc(T('pickupFee', { x: `${fmt(cat.pickup_fee)} ${T('currency')}` }))}</small></button>` : ''}</div>
+          ${cat.pickup ? `<button class="wz-opt ${st.method === 'pickup' ? 'on' : ''}" data-meth="pickup">🚗 ${T('pickup')}<br>${cat.pickup_fee ? `<small>${esc(T('pickupFee', { x: `${fmt(cat.pickup_fee)} ${T('currency')}` }))}</small>` : `<small class="free-tag">${T('pickupFree')}</small>`}</button>` : ''}</div>
         <div id="methBox" style="margin-top:14px"></div>
         <button class="btn btn-primary btn-block" id="n4" style="margin-top:14px">${T('next')}</button><button class="btn btn-soft wz-back">${T('back')}</button>`, 4);
       const draw = async () => {

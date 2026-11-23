@@ -96,6 +96,7 @@ window.I18N = {
     hk3q: 'مۆبایلەکەت شەحن ناکات؟', hk3a: 'زۆربەی جار کێشەکە سادەیە — پشکنینیش بەخۆڕاییە', hk3b: 'دەیپشکنین و پێش دەستلێدان نرخەکەت پێ دەڵێین',
     hk4q: 'دەترسیت پارچەکانی مۆبایلەکەت بگۆڕن؟', hk4a: 'پارچە کۆنەکەت دەدەینەوە دەستت، لەگەڵ گەرەنتی نووسراو',
     fromPrice: 'چاککردنەوە لە {x} دەست پێدەکات', chipWarranty: 'گەرەنتی نووسراو', chipOld: 'پارچە کۆنەکە هی خۆتە', chipFree: 'پشکنینی بەخۆڕایی', chipPrice: 'نرخی ڕوون',
+    hk5q: 'کاتت نییە بێیت؟', hk5a: 'لە ماڵەوە مۆبایلەکەت وەردەگرین و چاککراوی دەگەڕێنینەوە — گەیاندن بەخۆڕاییە 🚗', hk5b: 'لە ماڵەوە وەریدەگرین و چاککراوی دەگەڕێنینەوە 🚗', chipPickup: 'هێنان و بردنەوەی بەخۆڕایی', pickupFree: 'لە ماڵەوە وەریدەگرین و دەیگەڕێنینەوە — بەخۆڕایی', p_pickup: 'لە ماڵەوە وەریدەگرین و بەخۆڕایی دەیگەڕێنینەوە',
     shareMsg: 'لە {s} داوای مۆبایل و ئەکسسوار بکە! کۆدی داوەتی من: {c}', bestQuality: 'باشترین کوالێتی و مۆدێل',
   },
   ar: {
@@ -194,6 +195,7 @@ window.I18N = {
     hk3q: 'موبايلك ما يشحن؟', hk3a: 'أغلب الأحيان العطل بسيط — والفحص علينا مجاناً', hk3b: 'نفحصه ونقولك السعر قبل لا نلمسه',
     hk4q: 'خايف يبدلون قطع موبايلك؟', hk4a: 'القطعة القديمة ترجعلك بإيدك، ويا ضمان مكتوب',
     fromPrice: 'التصليح يبدأ من {x}', chipWarranty: 'ضمان مكتوب', chipOld: 'القطعة القديمة إلك', chipFree: 'فحص مجاني', chipPrice: 'سعر واضح',
+    hk5q: 'ما عندك وقت تجي؟', hk5a: 'نستلم موبايلك من بيتك ونرجعه مصلّح — والتوصيل ببلاش 🚗', hk5b: 'نستلمه من بيتك ونرجعه مصلّح 🚗', chipPickup: 'استلام وتوصيل ببلاش', pickupFree: 'نستلمه من بيتك ونرجعه — ببلاش', p_pickup: 'نستلمه من بيتك ونرجعه ببلاش',
     shareMsg: 'اطلب موبايلات وإكسسوارات من {s}! كود الدعوة: {c}', bestQuality: 'أفضل جودة وأحدث موديلات',
   },
   en: {
@@ -292,6 +294,7 @@ window.I18N = {
     hk3q: "Phone won't charge?", hk3a: "It's usually a small fix — and the check-up is on us", hk3b: 'We check it and tell you the price before we touch it',
     hk4q: 'Worried they’ll swap your parts?', hk4a: 'Your old part goes back in your hand, with a written warranty',
     fromPrice: 'Repairs from {x}', chipWarranty: 'Written warranty', chipOld: 'Old part is yours', chipFree: 'Free check-up', chipPrice: 'Clear prices',
+    hk5q: 'No time to come in?', hk5a: 'We pick your phone up from home and bring it back fixed — delivery is free 🚗', hk5b: 'We pick it up from home and bring it back fixed 🚗', chipPickup: 'Free pickup & return', pickupFree: 'We collect & return it — free', p_pickup: 'Free pickup from your home and return',
     shareMsg: 'Order phones & accessories from {s}! My invite code: {c}', bestQuality: 'Best quality & latest models',
   },
 };

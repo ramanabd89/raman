@@ -643,3 +643,7 @@ table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
 /* all hooks share one grid cell → the card keeps the height of the longest hook (no page jump) */
 .ra-hooks { display: grid; min-height: 0; }
 .ra-hook, .ra-hook.on { grid-area: 1 / 1; position: static; }
+
+.wz-opt .free-tag { color: var(--green); font-weight: 800; }
+.promise:nth-child(2) svg { color: var(--brand); }
+.ra-chips span[hidden] { display: none; }
