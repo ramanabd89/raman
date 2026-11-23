@@ -516,6 +516,23 @@ function bannerSvg(c1, c2, kind) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><rect width="900" height="360" fill="url(#bg)"/><circle cx="160" cy="60" r="160" fill="#fff" opacity=".07"/><circle cx="800" cy="330" r="120" fill="#fff" opacity=".06"/><g transform="translate(40 10) scale(.85)">${inner}</g></svg>`;
 }
 
+// repair pickup: exact map location + a note for the courier; comment thread customer ⇄ shop
+addColumn('repairs', 'lat', 'REAL');
+addColumn('repairs', 'lng', 'REAL');
+addColumn('repairs', 'loc_accuracy', 'INTEGER');
+addColumn('repairs', 'pickup_note', 'TEXT');
+db.exec(`
+CREATE TABLE IF NOT EXISTS repair_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  repair_id INTEGER NOT NULL REFERENCES repairs(id) ON DELETE CASCADE,
+  author TEXT NOT NULL,
+  name TEXT,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_repair_comments ON repair_comments(repair_id, id);
+`);
+
 seed();
 for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
   slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',

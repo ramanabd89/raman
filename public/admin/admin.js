@@ -744,8 +744,8 @@
         <td>${esc(r.customer_name)}<br><a class="num muted" href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
         <td><b>${esc(`${r.brand} ${r.model}`)}</b><br>${esc((r.service && (r.service.name_ar || r.service.name_ku)) || r.service_label)} <span class="pill">${RQ[r.quality]}</span>${r.problem ? `<br><span class="muted">${esc(r.problem)}</span>` : ''}${r.technician ? `<br><span class="muted">👨‍🔧 ${esc(r.technician)}</span>` : ''}</td>
         <td class="num"><b>${fmt(r.total)}</b>${r.extra_status === 'pending' ? `<br><span style="color:var(--red)">+${fmt(r.extra_price)} بانتظار الموافقة</span>` : ''}</td>
-        <td class="num">${r.method === 'pickup' ? `🚗 ${esc(r.city || '')}<br><span class="muted">${esc(r.address || '')}</span>` : `🏪 ${esc(r.appointment || '')}`}</td>
-        <td><span class="st ${rsCls(r.status)}">${RS[r.status]}</span></td>
+        <td class="num">${r.method === 'pickup' ? `🚗 ${esc(r.city || '')}<br><span class="muted">${esc(r.address || '')}</span>${r.map_url ? `<br><a class="sm-btn" target="_blank" rel="noopener" href="${esc(r.map_url)}">📍 الخريطة</a>` : ''}` : `🏪 ${esc(r.appointment || '')}`}</td>
+        <td><span class="st ${rsCls(r.status)}">${RS[r.status]}</span>${r.awaiting_reply ? '<br><span class="pill" style="background:#FDECEC;color:#D93B3B">💬 تعليق جديد</span>' : ''}</td>
         <td><div class="row-actions"><button class="sm-btn primary" data-open="${r.id}">إدارة</button><button class="sm-btn" data-label="${r.id}">🏷️</button></div></td></tr>`).join('')}</table>` : '<p class="muted">لا توجد تصليحات</p>'}</div>`;
     let deb; $('#rq').oninput = () => { clearTimeout(deb); deb = setTimeout(() => { location.hash = `#/repairs?s=${filter}&q=${encodeURIComponent($('#rq').value)}`; }, 500); };
     c.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => repairForm(list.find((x) => x.id === Number(b.dataset.open))));
@@ -765,6 +765,13 @@
     const waLink = (st) => `https://wa.me/${String(r.phone).replace(/\D/g, '').replace(/^0/, '964')}?text=${encodeURIComponent(waMsg(st))}`;
     modal(`تصليح ${esc(r.code)} — ${esc(`${r.brand} ${r.model}`)}`, `
       <div class="r-head"><span class="st ${rsCls(r.status)}">${RS[r.status]}</span> ${esc((r.service && (r.service.name_ar || r.service.name_ku)) || r.service_label)} · ${RQ[r.quality]} · <b class="num">${fmt(r.total)}</b> د.ع</div>
+      ${r.method === 'pickup' ? `<div class="card panel pickup-box"><b>🚗 استلام من البيت</b> — ${esc(r.city || '')}: ${esc(r.address || '')}
+        ${r.pickup_note ? `<div>🚚 ملاحظة للمندوب: <b>${esc(r.pickup_note)}</b></div>` : ''}
+        ${r.lat != null ? `<div class="row-actions" style="margin-top:8px"><a class="sm-btn primary" target="_blank" rel="noopener" href="${esc(r.map_url)}">📍 افتح الموقع</a>
+          <a class="sm-btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lng}">🧭 خذني للموقع</a>
+          <a class="sm-btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`${r.code} — ${r.customer_name} ${r.phone}\n${r.map_url}${r.pickup_note ? `\n${r.pickup_note}` : ''}`)}">📤 أرسله للمندوب</a>
+          ${r.loc_accuracy ? `<span class="muted">دقة ±${r.loc_accuracy} م</span>` : ''}</div>` : ''}</div>` : ''}
+      ${r.problem ? `<div class="card panel"><b>📝 وصف الزبون للعطل:</b> ${esc(r.problem)}</div>` : ''}
       ${r.warranty_claim ? `<div class="card panel warn-box">🛡️ نفس الجهاز (IMEI) انصلح سابقاً برمز <b>${esc(r.warranty_claim.code)}</b> — ${esc(r.warranty_claim.service_label)}، والضمان ساري لغاية ${esc(r.warranty_claim.warranty_until)}.</div>` : ''}
       <form id="rf"><div class="fgrid">
         <div class="field"><label>الحالة</label><select class="input" name="status" ${r.status === 'delivered' ? 'disabled' : ''}>${Object.entries(RS).map(([k, l]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -782,6 +789,9 @@
         ${['received', 'diagnosing', 'repairing'].includes(r.status) ? '<button class="sm-btn" id="askExtra">➕ طلب كلفة إضافية من الزبون</button>' : ''}
       </div>
       <div id="extraBox"></div>
+      <h3 style="margin:16px 0 8px;font-size:15px">💬 تعليقات الزبون</h3>
+      <div id="rcList">${(r.comments || []).map((c) => `<div class="rc ${c.author}"><small class="muted">${c.author === 'customer' ? '👤 الزبون' : `🏪 ${esc(c.name || '')}`} · <span class="num">${esc(c.created_at.slice(0, 16))}</span></small><div style="white-space:pre-wrap">${esc(c.body)}</div></div>`).join('') || '<p class="muted">ماكو تعليقات</p>'}</div>
+      <div style="display:flex;gap:8px;margin-top:8px"><input class="input" id="rcText" placeholder="رد على الزبون (يشوفه بصفحة التصليح)"><button type="button" class="sm-btn primary" id="rcSend">إرسال</button></div>
       <h3 style="margin:16px 0 8px;font-size:15px">السجل</h3><table class="t">${(r.events || []).map((e) => `<tr><td class="num muted" style="white-space:nowrap">${esc(e.created_at.slice(0, 16))}</td><td>${esc(RS[e.status] || e.status)}</td><td class="muted">${esc(e.note || '')}</td></tr>`).join('')}</table>`, (m, close) => {
       const drawGal = () => {
         m.querySelector('#rGal').innerHTML = photos.map((g, i) => `<span><img src="${safeImg(g)}"><button type="button" data-rmp="${i}">×</button></span>`).join('');
@@ -790,6 +800,10 @@
       drawGal();
       m.querySelector('#rUp').onchange = async (e) => { for (const f of e.target.files) { try { photos.push(await upload(f)); } catch (err) { toast(err.message); } } drawGal(); };
       m.querySelector('[name=status]').onchange = (e) => { m.querySelector('#waUp').href = waLink(e.target.value); };
+      m.querySelector('#rcSend').onclick = async () => {
+        const body = m.querySelector('#rcText').value.trim(); if (!body) return;
+        try { const nr = await api(`/admin/repairs/${r.id}/comments`, { method: 'POST', body: { body } }); close(); repairForm({ ...r, ...nr }); toast('انرسل الرد'); } catch (err) { toast(err.message); }
+      };
       m.querySelector('#rf').onsubmit = async (e) => {
         e.preventDefault();
         const fd = new FormData(e.target); const body = Object.fromEntries(fd);

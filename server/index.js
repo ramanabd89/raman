@@ -41,7 +41,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('X-Frame-Options', 'DENY'); // nobody can embed the shop/admin in a frame (clickjacking)
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), payment=()');
   res.setHeader('Content-Security-Policy', CSP);
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();

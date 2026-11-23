@@ -391,11 +391,11 @@ let stop = () => {};
   check('repair booked with code, price and warranty', /^R[A-Z0-9]{6}$/.test(RP.code) && RP.quoted_price === 155000 && RP.warranty_days === 90 && RP.status === 'booked', RP);
   r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'walkin', appointment: slot.slot } });
   check('full slot cannot be double-booked', r.data.error === 'repair_slot', r.data);
-  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x' } });
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x', lat: 36.191234, lng: 44.009876, loc_accuracy: 12 } });
   check('home pickup & return is free by default', r.data.pickup_fee === 0 && r.data.total === 155000, r.data);
   await call(`/repairs/${r.data.code}/cancel`, { method: 'POST', token: Q });
   await call('/admin/settings', { method: 'PUT', token: A2, body: { repair_pickup_fee: '5000' } });
-  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x' } });
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x', lat: 36.191234, lng: 44.009876, loc_accuracy: 12 } });
   check('pickup fee applies when the shop sets one', r.data.pickup_fee === 5000 && r.data.total === 160000, r.data);
   await call('/admin/settings', { method: 'PUT', token: A2, body: { repair_pickup_fee: '0' } });
   await call(`/repairs/${r.data.code}/cancel`, { method: 'POST', token: Q });
@@ -485,6 +485,27 @@ let stop = () => {};
     check('bundle: no discount on an accessory that does not fit', r.data.bundle_discount === 0, r.data);
   }
   await call('/admin/settings', { method: 'PUT', token: A2, body: { bundle_discount_percent: '0' } });
+
+  // ---------- repair pickup location + comments ----------
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x' } });
+  check('pickup without a map pin is refused', r.status === 400 && r.data.error === 'repair_location', r.data);
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x', lat: 51.5, lng: -0.12 } });
+  check('pickup pin outside Iraq is refused', r.data.error === 'repair_location', r.data);
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'قرب جامع', lat: 36.1912345678, lng: 44.0098765432, loc_accuracy: 9, pickup_note: 'اتصل قبل ما توصل', problem: 'وكع وانكسرت الشاشة' } });
+  const PR = r.data;
+  check('pickup keeps exact pin, courier note and problem', PR.lat === 36.191235 && PR.lng === 44.009877 && PR.loc_accuracy === 9 && PR.pickup_note === 'اتصل قبل ما توصل' && /maps/.test(PR.map_url), PR);
+  r = await call(`/repairs/${PR.code}/comments`, { method: 'POST', token: Q, body: { body: 'الرمز السري 1234' } });
+  check('customer can comment on their repair', r.data.comments && r.data.comments.length === 1 && r.data.comments[0].author === 'customer', r.data);
+  r = await call(`/repairs/${PR.code}/comments`, { method: 'POST', token: Q, body: { body: '' } });
+  check('empty comment refused', r.status === 400, r.data);
+  r = await call('/admin/repairs?status=open', { token: A2 });
+  const adm = r.data.find((x) => x.code === PR.code);
+  check('admin sees the comment as awaiting a reply', adm && adm.awaiting_reply === true, adm);
+  r = await call(`/admin/repairs/${adm.id}/comments`, { method: 'POST', token: A2, body: { body: 'تمام، وصلت' } });
+  check('shop replies', r.data.comments.length === 2 && r.data.comments[1].author === 'staff', r.data.comments);
+  r = await call(`/repairs/${PR.code}`, { token: Q });
+  check('customer sees the reply', r.data.comments.length === 2, r.data.comments);
+  check('other customers cannot comment on it', (await call(`/repairs/${PR.code}/comments`, { method: 'POST', token: A2, body: { body: 'x' } })).status === 404);
 
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();

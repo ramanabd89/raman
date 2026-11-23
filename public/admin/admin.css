@@ -105,3 +105,8 @@ select.input.sm { height: 38px; padding: 0 10px; border-radius: 10px; font-size:
 .r-head { margin-bottom: 12px; color: var(--ink-2); }
 .r-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 a.kpi { color: inherit; }
+
+.pickup-box { margin: 10px 0; background: #F4FBF7; border: 1px solid #CDEFD9; }
+.rc { padding: 8px 12px; border-radius: 12px; margin-bottom: 6px; }
+.rc.customer { background: #FFF4EC; }
+.rc.staff { background: #F2F4F7; }

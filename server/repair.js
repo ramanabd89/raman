@@ -7,6 +7,7 @@ const QUALITIES = ['original', 'copy', 'diagnosis'];
 const IRAQ_OFFSET_MS = 3 * 3600 * 1000; // Asia/Baghdad, no daylight saving
 const iraqNow = () => new Date(Date.now() + IRAQ_OFFSET_MS).toISOString().slice(0, 16).replace('T', ' '); // "YYYY-MM-DD HH:MM"
 
+const mapUrl = (r) => `https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}`;
 function newCode(db) {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (;;) {
@@ -87,7 +88,7 @@ function register(app, admin, h) {
     const opt = q.options.find((o) => o.quality === req.body.quality) || (q.options.length === 1 ? q.options[0] : null);
     if (!opt) throw new HttpError(400, 'repair_quality');
     const method = req.body.method === 'pickup' ? 'pickup' : 'walkin';
-    let appointment = null; let city = null; let address = null;
+    let appointment = null; let city = null; let address = null; let lat = null; let lng = null; let acc = null;
     if (method === 'walkin') {
       appointment = str(req.body.appointment, 16);
       const slot = slotsFor(appointment.slice(0, 10)).find((x) => x.slot === appointment);
@@ -96,15 +97,21 @@ function register(app, admin, h) {
       if (s.repair_pickup !== '1') throw new HttpError(400, 'repair_pickup');
       city = str(req.body.city, 60); address = str(req.body.address, 300);
       if (!city || !address) throw new HttpError(400, 'invalid_input');
+      // the courier needs the exact spot: a pin on the map inside Iraq / Kurdistan
+      lat = Number(req.body.lat); lng = Number(req.body.lng);
+      if (!(lat >= 29 && lat <= 37.5 && lng >= 38.7 && lng <= 48.8)) throw new HttpError(400, 'repair_location');
+      lat = Math.round(lat * 1e6) / 1e6; lng = Math.round(lng * 1e6) / 1e6;
+      acc = req.body.loc_accuracy != null && req.body.loc_accuracy !== '' ? Math.min(Math.max(int(req.body.loc_accuracy), 0), 100000) : null;
     }
     const svcName = q.service.name_ku;
     const code = newCode(db);
     const id = tx(() => {
       const rid = Number(db.prepare(`INSERT INTO repairs(code, user_id, customer_name, phone, brand, model, service_id, service_label, quality, quoted_price,
-        pickup_fee, warranty_days, method, appointment, city, address, imei, problem) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        pickup_fee, warranty_days, method, appointment, city, address, imei, problem, lat, lng, loc_accuracy, pickup_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(code, req.user.id, str(req.body.name, 80) || req.user.name, str(req.body.phone, 20).replace(/[^\d+]/g, '') || req.user.phone, brand, model,
           q.service.id, svcName, opt.quality, opt.price, method === 'pickup' ? int(s.repair_pickup_fee, 0) : 0, opt.warranty_days,
-          method, appointment, city, address, str(req.body.imei, 20) || null, str(req.body.problem, 500) || null).lastInsertRowid);
+          method, appointment, city, address, str(req.body.imei, 20) || null, str(req.body.problem, 1000) || null,
+          lat, lng, acc, method === 'pickup' ? str(req.body.pickup_note, 300) || null : null).lastInsertRowid);
       db.prepare('INSERT INTO repair_events(repair_id, status, by_name) VALUES(?,?,?)').run(rid, 'booked', req.user.name);
       return rid;
     });
@@ -112,6 +119,8 @@ function register(app, admin, h) {
     notify([`🔧 <b>حجز تصليح ${r.code}</b>`, `👤 ${escHtml(r.customer_name)} — 📞 ${escHtml(r.phone)}`, `📱 ${escHtml(`${r.brand} ${r.model}`)} — ${escHtml(svcName)}`,
       `💰 ${r.quality === 'diagnosis' ? 'بعد الفحص' : `${Number(r.quoted_price).toLocaleString('en-US')} د.ع (${r.quality === 'original' ? 'أصلي' : 'بديل'})`}`,
       r.method === 'pickup' ? `🚗 استلام من: ${escHtml(r.city)} — ${escHtml(r.address)}` : `🕐 موعد: ${escHtml(r.appointment)}`,
+      r.lat != null ? `📍 الموقع: ${mapUrl(r)}${r.loc_accuracy ? ` (±${r.loc_accuracy} م)` : ''}` : null,
+      r.pickup_note ? `🚚 للمندوب: ${escHtml(r.pickup_note)}` : null,
       r.problem ? `📝 ${escHtml(r.problem)}` : null, PUBLIC_URL ? `${escHtml(PUBLIC_URL)}/admin/#/repairs` : null].filter(Boolean).join('\n'));
     res.json(withEvents(r));
   }));
@@ -122,6 +131,8 @@ function register(app, admin, h) {
     const svc = r.service_id ? db.prepare('SELECT name_ku, name_ar, name_en FROM repair_services WHERE id = ?').get(r.service_id) : null;
     const out = { ...r, photos, old_part_returned: !!r.old_part_returned, service: svc || { name_ku: r.service_label },
       events: db.prepare('SELECT status, note, created_at FROM repair_events WHERE repair_id = ? ORDER BY id').all(r.id),
+      comments: db.prepare('SELECT id, author, name, body, created_at FROM repair_comments WHERE repair_id = ? ORDER BY id').all(r.id),
+      map_url: r.lat != null ? mapUrl(r) : null,
       total: (r.final_price ?? (r.quoted_price + r.approved_extra)) + r.pickup_fee };
     if (forCustomer) { delete out.parts_cost; delete out.technician; }
     return out;
@@ -149,6 +160,19 @@ function register(app, admin, h) {
     notify(`🔧 ${r.code}: الزبون ${approve ? '✅ وافق على' : '❌ رفض'} السعر الإضافي ${Number(r.extra_price).toLocaleString('en-US')} د.ع`);
     res.json(withEvents(db.prepare('SELECT * FROM repairs WHERE id = ?').get(r.id)));
   }));
+  // Comments: the customer can add notes / questions about their phone at any time; the shop answers from the admin.
+  app.post('/api/repairs/:code/comments', requireUser, wrap((req, res) => {
+    const r = db.prepare('SELECT * FROM repairs WHERE code = ? AND user_id = ?').get(str(req.params.code, 12).toUpperCase(), req.user.id);
+    if (!r) throw new HttpError(404, 'not_found');
+    const body = str(req.body.body, 1000);
+    if (!body) throw new HttpError(400, 'invalid_input');
+    const recent = db.prepare("SELECT COUNT(*) n FROM repair_comments WHERE repair_id = ? AND author = 'customer' AND created_at > datetime('now', '-1 hour')").get(r.id).n;
+    if (recent >= 20) throw new HttpError(429, 'too_many_attempts');
+    db.prepare("INSERT INTO repair_comments(repair_id, author, name, body) VALUES(?, 'customer', ?, ?)").run(r.id, req.user.name, body);
+    notify(`💬 <b>${r.code}</b> — ${escHtml(r.customer_name)} (${escHtml(`${r.brand} ${r.model}`)}):\n${escHtml(body)}${PUBLIC_URL ? `\n${escHtml(PUBLIC_URL)}/admin/#/repairs` : ''}`);
+    res.json(withEvents(db.prepare('SELECT * FROM repairs WHERE id = ?').get(r.id)));
+  }));
+
   app.post('/api/repairs/:code/cancel', requireUser, wrap((req, res) => {
     const r = db.prepare('SELECT * FROM repairs WHERE code = ? AND user_id = ?').get(str(req.params.code, 12).toUpperCase(), req.user.id);
     if (!r) throw new HttpError(404, 'not_found');
@@ -177,8 +201,18 @@ function register(app, admin, h) {
     // warranty claims: same IMEI repaired before and still under warranty
     res.json(rows.map((r) => {
       const prior = r.imei ? db.prepare("SELECT code, service_label, warranty_until FROM repairs WHERE imei = ? AND id != ? AND status = 'delivered' AND warranty_until >= ?").get(r.imei, r.id, iraqNow().slice(0, 10)) : null;
-      return { ...withEvents(r, { forCustomer: false }), warranty_claim: prior || null };
+      const out = { ...withEvents(r, { forCustomer: false }), warranty_claim: prior || null };
+      out.awaiting_reply = out.comments.length > 0 && out.comments[out.comments.length - 1].author === 'customer';
+      return out;
     }));
+  }));
+  admin.post('/repairs/:id/comments', wrap((req, res) => {
+    const r = db.prepare('SELECT * FROM repairs WHERE id = ?').get(int(req.params.id));
+    if (!r) throw new HttpError(404, 'not_found');
+    const body = str(req.body.body, 1000);
+    if (!body) throw new HttpError(400, 'invalid_input');
+    db.prepare("INSERT INTO repair_comments(repair_id, author, name, body) VALUES(?, 'staff', ?, ?)").run(r.id, req.user.name, body);
+    res.json(withEvents(db.prepare('SELECT * FROM repairs WHERE id = ?').get(r.id), { forCustomer: false }));
   }));
   admin.put('/repairs/:id', wrap((req, res) => {
     const r = db.prepare('SELECT * FROM repairs WHERE id = ?').get(int(req.params.id));

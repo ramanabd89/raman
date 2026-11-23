@@ -1455,7 +1455,7 @@
     app.innerHTML = '<div class="spinner"></div>';
     const cat = await api('/repair/catalog').catch(() => ({ enabled: false }));
     if (!cat.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_repair_disabled')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
-    let st = { brand: null, model: null, service: null, quote: null, quality: null, problem: '', method: 'walkin', day: null, slot: null, city: '', address: '' };
+    let st = { brand: null, model: null, service: null, quote: null, quality: null, problem: '', method: 'walkin', day: null, slot: null, city: '', address: '', lat: null, lng: null, acc: null, note: '' };
     if (resume) { const d = store.get('repair_draft', null); if (d) st = { ...st, ...d }; store.del('repair_draft'); }
     const wa = String(S.settings.whatsapp || '').replace(/\D/g, '');
     const shell = (title, body, n) => `${pageHead(T('repairTitle'))}<div class="container wizard"><div class="wz-progress"><i style="width:${n * 20}%"></i></div><div class="wz-step">${esc(T('step', { x: n, y: 5 }))}</div><h2 class="wz-q">${title}</h2>${body}</div>`;
@@ -1502,7 +1502,7 @@
           <div class="ro-top"><b>${T(`q_${o.quality}`)}</b>${o.quality === 'diagnosis' ? `<span class="free">${T('free')}</span>` : money(o.price)}</div>
           <div class="ro-meta"><span>${I.shield}${esc(T('warrantyDays', { x: o.warranty_days }))}</span>${q.duration_min ? `<span>${I.clock}${esc(T('durationMin', { x: q.duration_min }))}</span>` : ''}${q.duration_min && q.duration_min <= 60 ? `<span class="front">${I.check}${T('inFront')}</span>` : ''}</div></button>`).join('')}</div>
         ${q.needs_diagnosis || cat.free_diagnosis ? `<p class="ti-note">${I.gift}<span>${T('freeDiag')}</span></p>` : ''}
-        <div class="field"><label>${T('problemLbl')}</label><textarea class="input" id="prob">${esc(st.problem)}</textarea></div>
+        <div class="field"><label>${T('problemLbl')}</label><textarea class="input" id="prob" rows="3" maxlength="1000" placeholder="${esc(T('problemPh'))}">${esc(st.problem)}</textarea></div>
         <button class="btn btn-primary btn-block" id="n3" ${st.quality ? '' : 'disabled'}>${T('next')}</button><button class="btn btn-soft wz-back">${T('back')}</button>`, 3);
       app.querySelectorAll('[data-rq]').forEach((b) => b.onclick = () => { st.quality = b.dataset.rq; app.querySelectorAll('[data-rq]').forEach((x) => x.classList.toggle('on', x === b)); $('#n3').disabled = false; });
       $('#n3').onclick = () => { st.problem = $('#prob').value; s4(); };
@@ -1523,7 +1523,14 @@
         const box = $('#methBox');
         if (st.method === 'pickup') {
           box.innerHTML = `<div class="field"><label>${T('city')}</label><select class="input" id="rcity">${zones().map((z) => `<option ${z.name === st.city ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select></div>
-            <div class="field"><label>${T('address')}</label><input class="input" id="raddr" value="${esc(st.address)}"></div>`;
+            <div class="loc-box"><div class="f-lbl" style="margin-top:0">📍 ${T('locTitle')}</div>
+              <button type="button" class="btn btn-soft btn-block" id="locBtn">${I.map}${T('locBtn')}</button>
+              <div class="loc-map-wrap"><div class="loc-map" id="locMap"></div><div class="loc-pin" aria-hidden="true">${I.map}</div></div>
+              <div class="loc-status" id="locStatus">${esc(T('locHint'))}</div></div>
+            <div class="field"><label>${T('addrLbl')}</label><input class="input" id="raddr" value="${esc(st.address)}"></div>
+            <div class="field"><label>${T('pickupNoteLbl')}</label><textarea class="input" id="rnote" rows="2" maxlength="300" placeholder="${esc(T('pickupNotePh'))}">${esc(st.note)}</textarea></div>`;
+          if (!st.city) st.city = $('#rcity').value;
+          setupPickupMap();
           return;
         }
         box.innerHTML = `<div class="section-title" style="font-size:15px;margin:0 0 8px">${T('chooseDay')}</div><div class="days">${days.map((d) => `<button class="day ${st.day === d ? 'on' : ''}" data-day="${d}">${dayLbl(d)}</button>`).join('')}</div>
@@ -1535,13 +1542,55 @@
       };
       app.querySelectorAll('[data-meth]').forEach((b) => b.onclick = () => { st.method = b.dataset.meth; app.querySelectorAll('[data-meth]').forEach((x) => x.classList.toggle('on', x === b)); draw(); });
       $('#n4').onclick = () => {
-        if (st.method === 'pickup') { st.city = $('#rcity').value; st.address = $('#raddr').value.trim(); if (!st.address) return toast(T('err_invalid_input')); }
+        if (st.method === 'pickup') {
+          st.city = $('#rcity').value; st.address = $('#raddr').value.trim(); st.note = $('#rnote').value.trim();
+          if (st.lat == null) { toast(T('locNeeded')); $('#locStatus').classList.add('bad'); $('.loc-box').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+          if (!st.address) return toast(T('err_invalid_input'));
+        }
         else if (!st.slot) return toast(T('chooseTime'));
         s5();
       };
       app.querySelector('.wz-back').onclick = s3;
       draw();
     };
+    // Pickup: the customer must give the exact spot. GPS first, then they fine-tune by moving the map under a fixed pin.
+    let lmap = null;
+    const setStatus = (txt, cls) => { const el = $('#locStatus'); if (el) { el.textContent = txt; el.className = `loc-status ${cls || ''}`; } };
+    const okStatus = () => setStatus(`${T('locOk')}${st.acc ? ` · ${T('locAcc', { x: st.acc })}` : ''}`, 'ok');
+    const locate = () => {
+      if (!navigator.geolocation) { setStatus(T('locDenied'), 'bad'); return; }
+      setStatus(T('locLoading'));
+      navigator.geolocation.getCurrentPosition((pos) => {
+        st.lat = pos.coords.latitude; st.lng = pos.coords.longitude; st.acc = Math.round(pos.coords.accuracy || 0) || null;
+        if (lmap) lmap.setView([st.lat, st.lng], 18);
+        okStatus();
+      }, () => setStatus(T('locDenied'), 'bad'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    };
+    const setupPickupMap = async () => {
+      $('#locBtn').onclick = locate;
+      const cityCenter = () => {
+        const c = String($('#rcity') ? $('#rcity').value : st.city || '').toLowerCase();
+        const known = [[/erbil|arbil|hewl|هەولێر|اربيل|أربيل/, [36.191, 44.009]], [/sul|سلێمانی|السليمانية|سليمانية/, [35.557, 45.435]], [/duhok|dohuk|دهۆک|دهوك/, [36.867, 42.988]],
+          [/baghdad|بەغدا|بغداد/, [33.315, 44.366]], [/kirkuk|کەرکووک|كركوك/, [35.468, 44.392]], [/basra|بەسرە|البصرة|بصرة/, [30.508, 47.783]], [/mosul|موسڵ|الموصل|موصل/, [36.34, 43.13]],
+          [/halabja|هەڵەبجە|حلبجة/, [35.178, 45.986]], [/zakho|زاخۆ|زاخو/, [37.144, 42.687]], [/najaf|نجف/, [32.0, 44.33]], [/karbala|كربلاء/, [32.616, 44.025]]];
+        const k = known.find(([re]) => re.test(c));
+        return k ? k[1] : [36.191, 44.009];
+      };
+      try { await loadLeaflet(); } catch { $('.loc-map-wrap').remove(); setStatus(T('locNoMap'), 'bad'); if (st.lat == null) locate(); else okStatus(); return; }
+      if (!$('#locMap')) return;
+      lmap = window.L.map('locMap', { zoomControl: true, attributionControl: true }).setView(st.lat != null ? [st.lat, st.lng] : cityCenter(), st.lat != null ? 18 : 13);
+      window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(lmap);
+      // the customer moved the map by hand → the pin (map centre) is their exact spot
+      lmap.on('dragend zoomend', (e) => {
+        if (e.type === 'zoomend' && st.lat == null) return;
+        const c = lmap.getCenter(); st.lat = c.lat; st.lng = c.lng;
+        if (e.type === 'dragend') st.acc = null;
+        okStatus();
+      });
+      $('#rcity').onchange = () => { st.city = $('#rcity').value; if (st.lat == null) lmap.setView(cityCenter(), 13); };
+      if (st.lat != null) okStatus(); else locate(); // asks for location permission straight away
+    };
+
     const s5 = () => {
       const o = st.quote.options.find((x) => x.quality === st.quality);
       const fee = st.method === 'pickup' ? cat.pickup_fee : 0;
@@ -1551,6 +1600,9 @@
           <div class="sum-row"><span>${T(`q_${st.quality}`)}</span>${o.quality === 'diagnosis' ? `<b>${T('q_diagnosis')}</b>` : money(o.price)}</div>
           <div class="sum-row"><span>${T('certTitle')}</span><b>${esc(T('warrantyDays', { x: o.warranty_days }))}</b></div>
           <div class="sum-row"><span>${st.method === 'pickup' ? T('pickup') : T('walkin')}</span><b class="num">${esc(st.method === 'pickup' ? `${st.city} — ${st.address}` : st.slot)}</b></div>
+          ${st.method === 'pickup' && st.lat != null ? `<div class="sum-row"><span>📍 ${T('pickupSpot')}</span><a class="loc-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${st.lat.toFixed(6)},${st.lng.toFixed(6)}">${T('openInMaps')}</a></div>` : ''}
+          ${st.method === 'pickup' && st.note ? `<div class="sum-row"><span>${T('pickupNoteLbl')}</span><b>${esc(st.note)}</b></div>` : ''}
+          ${st.problem ? `<div class="sum-row"><span>${T('problemLbl')}</span><b>${esc(st.problem)}</b></div>` : ''}
           ${fee ? `<div class="sum-row"><span>${esc(T('pickupFee', { x: '' }))}</span>${money(fee)}</div>` : ''}
           ${o.quality !== 'diagnosis' ? `<div class="sum-row total"><span>${T('total')}</span>${money(o.price + fee)}</div>` : ''}
           <p class="ti-note">${I.check}<span>${T('p_approval')}</span></p>
@@ -1561,10 +1613,11 @@
         if (!S.user) { store.set('repair_draft', st); location.hash = `#/quick?next=${encodeURIComponent('repair?resume=1')}`; return; }
         const btn = $('#book'); btn.disabled = true;
         try {
-          const r = await api('/repairs', { method: 'POST', body: { brand: st.brand, model: st.model, service_id: st.service.id, quality: st.quality, method: st.method, appointment: st.slot, city: st.city, address: st.address, problem: st.problem } });
+          const r = await api('/repairs', { method: 'POST', body: { brand: st.brand, model: st.model, service_id: st.service.id, quality: st.quality, method: st.method, appointment: st.slot, city: st.city, address: st.address, problem: st.problem,
+            lat: st.lat, lng: st.lng, loc_accuracy: st.acc, pickup_note: st.note } });
           toast(T('repairBooked'));
           location.hash = `#/repairs/${r.code}`;
-        } catch (e) { btn.disabled = false; toast(errMsg(e)); if (e.code === 'repair_slot') s4(); }
+        } catch (e) { btn.disabled = false; toast(errMsg(e)); if (e.code === 'repair_slot' || e.code === 'repair_location') s4(); }
       };
     };
     if (resume && st.quote && st.quality) s5(); else if (start) s1(); else intro();
@@ -1597,6 +1650,7 @@
           <div class="fd-actions"><button class="btn btn-soft" data-dec="0">${T('reject')}</button><button class="btn btn-primary" data-dec="1">${T('approve')}</button></div>
           <small>${T('extraRejectedNote')}</small></div>` : ''}
         ${r.status !== 'cancelled' ? `<div class="card r-timeline">${flow.map((st, i) => `<div class="rt ${i <= cur ? 'done' : ''} ${i === cur ? 'cur' : ''}"><i></i><span>${T(`rs_${st}`)}</span></div>`).join('')}</div>` : ''}
+        <div class="card r-comments" id="rComments"></div>
         ${r.photos.length ? `<div class="card" style="padding:16px;margin-bottom:14px"><h3 style="margin:0 0 10px;font-size:16px">${T('photosTitle')}</h3><div class="r-photos">${r.photos.map((p) => `<a href="${img(p)}" target="_blank" rel="noopener"><img src="${img(p)}" alt=""></a>`).join('')}</div></div>` : ''}
         ${r.status === 'delivered' && r.warranty_until ? `<div class="card cert" id="cert"><div class="cert-hd">${I.shield}<b>${T('certTitle')}</b></div>
           <div class="cert-code num">${esc(r.code)}</div><div class="cert-dev">${esc(`${r.brand} ${r.model}`)} · ${esc(L(r.service, 'name'))} · ${T(`q_${r.quality}`)}</div>
@@ -1613,6 +1667,9 @@
         ${r.pickup_fee ? `<div class="sum-row"><span>${esc(T('pickupFee', { x: '' }))}</span>${money(r.pickup_fee)}</div>` : ''}
         <div class="sum-row total"><span>${T('total')}</span>${money(r.total)}</div>
         <div class="sum-row"><span>${r.method === 'pickup' ? T('pickup') : T('walkin')}</span><b class="num">${esc(r.appointment || `${r.city || ''} — ${r.address || ''}`)}</b></div>
+        ${r.map_url ? `<div class="sum-row"><span>📍 ${T('pickupSpot')}</span><a class="loc-link" target="_blank" rel="noopener" href="${esc(safeUrl(r.map_url))}">${T('openInMaps')}</a></div>` : ''}
+        ${r.pickup_note ? `<div class="sum-row"><span>${T('pickupNoteLbl')}</span><b>${esc(r.pickup_note)}</b></div>` : ''}
+        ${r.problem ? `<div class="sum-row"><span>${T('problemLbl')}</span><b>${esc(r.problem)}</b></div>` : ''}
         <div class="sum-row"><span>${T('certTitle')}</span><b>${esc(T('warrantyDays', { x: r.warranty_days }))}</b></div>
         ${r.status === 'booked' ? `<button class="btn btn-danger btn-block" id="rCancel" style="margin-top:10px">${T('cancelOrder')}</button>` : ''}
       </div></div>`;
@@ -1621,7 +1678,38 @@
     });
     if ($('#rCancel')) $('#rCancel').onclick = async () => { if (!confirm(T('confirmCancel'))) return; await api(`/repairs/${r.code}/cancel`, { method: 'POST' }).catch(() => {}); viewRepairTicket(r.code); };
     if ($('#printCert')) $('#printCert').onclick = () => window.print();
+    drawRepairComments(r);
     if ($('#qr')) drawQr($('#qr'), `${location.origin}/#/warranty/${r.code}`);
+  }
+  function drawRepairComments(r) {
+    const el = $('#rComments'); if (!el) return;
+    const list = r.comments || [];
+    el.innerHTML = `<h3>💬 ${T('commentsTitle')}</h3>
+      ${list.length ? `<div class="cm-list">${list.map((c) => `<div class="cm ${c.author === 'customer' ? 'me' : 'shop'}"><small>${c.author === 'customer' ? T('commentYou') : `${esc(S.settings.store_name || T('commentShop'))}`} · <span class="num">${esc(String(c.created_at).slice(5, 16).replace('T', ' '))}</span></small><p dir="auto">${esc(c.body)}</p></div>`).join('')}</div>`
+        : `<p class="cm-empty">${T('commentsEmpty')}</p>`}
+      ${r.status !== 'cancelled' ? `<div class="cm-form"><textarea class="input" id="cmText" rows="2" maxlength="1000" placeholder="${esc(T('commentPh'))}"></textarea><button class="btn btn-primary" id="cmSend">${T('commentSend')}</button></div>` : ''}`;
+    const list2 = el.querySelector('.cm-list'); if (list2) list2.scrollTop = list2.scrollHeight;
+    const btn = $('#cmSend');
+    if (btn) btn.onclick = async () => {
+      const body = $('#cmText').value.trim(); if (!body) return;
+      btn.disabled = true;
+      try { const nr = await api(`/repairs/${encodeURIComponent(r.code)}/comments`, { method: 'POST', body: { body } }); drawRepairComments(nr); }
+      catch (e) { btn.disabled = false; toast(errMsg(e)); }
+    };
+  }
+  // Map library (only loaded on the pickup step)
+  function loadLeaflet() {
+    if (window.L && window.L.map) return Promise.resolve();
+    if (S.leafletLoading) return S.leafletLoading;
+    S.leafletLoading = new Promise((resolve, reject) => {
+      const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/vendor/leaflet/leaflet.css'; document.head.appendChild(css);
+      const sc = document.createElement('script'); sc.src = '/vendor/leaflet/leaflet.js';
+      sc.onload = () => (window.L && window.L.map ? resolve() : reject(new Error('leaflet')));
+      sc.onerror = () => { S.leafletLoading = null; reject(new Error('leaflet')); };
+      document.head.appendChild(sc);
+      setTimeout(() => { if (!(window.L && window.L.map)) { S.leafletLoading = null; reject(new Error('timeout')); } }, 12000);
+    });
+    return S.leafletLoading;
   }
   // QR code for the warranty certificate (library loaded only when needed; the link text is shown anyway).
   function drawQr(el, text) {

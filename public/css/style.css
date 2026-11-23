@@ -899,3 +899,28 @@ table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
 .visit-txt p { margin: 0; font-weight: 600; }
 .visit-txt small { color: var(--ink-2); }
 .link-btn { color: var(--brand); font-weight: 800; padding: 4px 0 14px; }
+
+/* ================= repair pickup map + comments ================= */
+.loc-box { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin-bottom: 14px; }
+.loc-box .btn svg { width: 18px; height: 18px; }
+.loc-map-wrap { position: relative; margin-top: 10px; border-radius: 14px; overflow: hidden; }
+.loc-map { height: 280px; background: #E9ECF1; z-index: 0; }
+.loc-pin { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; transform: translate(-50%, -100%); color: var(--brand); pointer-events: none; z-index: 500; filter: drop-shadow(0 3px 4px rgba(0,0,0,.35)); }
+.loc-pin svg { width: 100%; height: 100%; }
+.loc-status { margin-top: 8px; font-size: 13.5px; font-weight: 700; color: var(--ink-2); }
+.loc-status.ok { color: #1F9D55; }
+.loc-status.bad { color: var(--red); }
+.loc-link { color: var(--brand); font-weight: 800; }
+.r-comments { padding: 16px; margin-bottom: 14px; }
+.r-comments h3 { margin: 0 0 10px; font-size: 16px; }
+.cm-list { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; margin-bottom: 10px; }
+.cm { max-width: 85%; padding: 8px 12px; border-radius: 14px; }
+.cm small { color: var(--muted); font-size: 11.5px; }
+.cm p { margin: 2px 0 0; white-space: pre-wrap; line-height: 1.6; }
+.cm.me { align-self: flex-start; background: var(--brand-soft); }
+.cm.shop { align-self: flex-end; background: #F2F4F7; }
+.cm-empty { color: var(--ink-2); font-size: 13.5px; margin: 0 0 10px; }
+.cm-form { display: flex; gap: 8px; align-items: flex-end; }
+.cm-form .input { flex: 1; min-width: 0; }
+.cm-form .btn { flex: 0 0 auto; }
+.leaflet-container { font-family: inherit; }
