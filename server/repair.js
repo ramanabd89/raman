@@ -115,7 +115,8 @@ function register(app, admin, h) {
   function withEvents(r, { forCustomer = true } = {}) {
     if (!r) return r;
     let photos = []; try { photos = JSON.parse(r.photos || '[]'); } catch { photos = []; }
-    const out = { ...r, photos, old_part_returned: !!r.old_part_returned,
+    const svc = r.service_id ? db.prepare('SELECT name_ku, name_ar, name_en FROM repair_services WHERE id = ?').get(r.service_id) : null;
+    const out = { ...r, photos, old_part_returned: !!r.old_part_returned, service: svc || { name_ku: r.service_label },
       events: db.prepare('SELECT status, note, created_at FROM repair_events WHERE repair_id = ? ORDER BY id').all(r.id),
       total: (r.final_price ?? (r.quoted_price + r.approved_extra)) + r.pickup_fee };
     if (forCustomer) { delete out.parts_cost; delete out.technician; }
@@ -155,9 +156,10 @@ function register(app, admin, h) {
   }));
   // Public warranty check by certificate code: no personal data.
   app.get('/api/warranty/:code', wrap((req, res) => {
-    const r = db.prepare("SELECT code, brand, model, service_label, quality, warranty_days, warranty_until, status, updated_at FROM repairs WHERE code = ? AND status = 'delivered'").get(str(req.params.code, 12).toUpperCase());
+    const r = db.prepare("SELECT code, brand, model, service_id, service_label, quality, warranty_days, warranty_until, status, updated_at FROM repairs WHERE code = ? AND status = 'delivered'").get(str(req.params.code, 12).toUpperCase());
     if (!r) throw new HttpError(404, 'not_found');
-    res.json({ ...r, valid: !!r.warranty_until && r.warranty_until >= iraqNow().slice(0, 10) });
+    const svc = r.service_id ? db.prepare('SELECT name_ku, name_ar, name_en FROM repair_services WHERE id = ?').get(r.service_id) : null;
+    res.json({ ...r, service: svc || { name_ku: r.service_label }, valid: !!r.warranty_until && r.warranty_until >= iraqNow().slice(0, 10) });
   }));
 
   // ---------- admin ----------

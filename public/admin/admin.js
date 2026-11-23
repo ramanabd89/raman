@@ -12,10 +12,10 @@
   const TI_ST = { pending: 'بانتظار الفحص', accepted: 'مقبول', adjusted: 'تم تعديل السعر', rejected: 'مرفوض (الزبون احتفظ بجهازه)', cancelled: 'ملغي' };
   const TI_Q = { screen: ['الشاشة', { perfect: 'سليمة', scratches: 'خدوش خفيفة', cracked: 'مكسورة' }], body: ['الهيكل', { perfect: 'مثل الجديد', scratches: 'خدوش', damaged: 'ضربات/ظهر مكسور' }],
     battery: ['البطارية', { good: '85%+', ok: '80–84%', weak: 'أقل من 80%' }], works: ['يشتغل كله؟', { yes: 'نعم', no: 'بيه عطل' }], box: ['الكرتونة والشاحن', { yes: 'موجود', no: 'غير موجود' }] };
-  const ROLES = { admin: 'المالك (كل الصلاحيات)', manager: 'مدير', orders: 'موظف طلبات', products: 'موظف منتجات ومخزن' };
+  const ROLES = { admin: 'المالك (كل الصلاحيات)', manager: 'مدير', orders: 'موظف طلبات', products: 'موظف منتجات ومخزن', technician: 'فني تصليح' };
   const SRC = { tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', snapchat: 'Snapchat', friend: 'صديق', influencer: 'مؤثر', google: 'Google', store: 'من المحل', other: 'غير ذلك', unknown: 'لم يُحدد' };
   const ST = { pending: 'قيد الانتظار', preparing: 'قيد التجهيز', shipping: 'في الطريق', delivered: 'تم التوصيل', cancelled: 'ملغي' };
-  const ERR = { tradein_model: 'الموديل غير متوفر',  coupon_exists: 'هذا الكود موجود مسبقاً',  usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
+  const ERR = { repair_closed: 'التصليح مُسلَّم ولا يمكن تغيير حالته',  tradein_model: 'الموديل غير متوفر',  coupon_exists: 'هذا الكود موجود مسبقاً',  usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
 
   async function api(path, opts = {}) {
     const headers = {};
@@ -78,7 +78,7 @@
   // [route, label, section] grouped like the menu. Each staff role only sees its sections.
   const NAV = [
     ['الرئيسية', [['dashboard', '📊 لوحة المعلومات', 'dashboard'], ['analytics', '👁️ تحليل الزوار', 'analytics']]],
-    ['المبيعات والطلبات', [['orders', '📦 الطلبات', 'orders'], ['users', '👥 الزبائن', 'customers'], ['carts', '🛒 السلات المتروكة', 'carts'], ['tradein', '🔄 تبديل الأجهزة', 'tradein'], ['coupons', '🏷️ الكوبونات', 'coupons'], ['expenses', '💸 المصاريف والأرباح', 'expenses']]],
+    ['المبيعات والطلبات', [['orders', '📦 الطلبات', 'orders'], ['users', '👥 الزبائن', 'customers'], ['carts', '🛒 السلات المتروكة', 'carts'], ['tradein', '🔄 تبديل الأجهزة', 'tradein'], ['repairs', '🔧 التصليح', 'repairs'], ['coupons', '🏷️ الكوبونات', 'coupons'], ['expenses', '💸 المصاريف والأرباح', 'expenses']]],
     ['المخزن والمنتجات', [['products', '📱 المنتجات', 'products'], ['bulk', '💱 تغيير الأسعار بالجملة', 'products'], ['categories', '🗂️ الأقسام', 'catalog'], ['presets', '📐 قوالب الأنواع والسعات', 'products'], ['tags', '🔖 ملصقات المنتجات', 'catalog'], ['stock', '📋 حركة المخزن', 'stock']]],
     ['الموقع', [['banners', '🖼️ البانرات', 'banners'], ['faqs', '❓ الأسئلة الشائعة', 'faqs'], ['settings', '⚙️ الإعدادات', 'admin_only']]],
     ['الأمان', [['staff', '🧑‍💼 مدراء النظام', 'admin_only'], ['security', '🔒 الأمان والنسخ', 'all']]],
@@ -148,6 +148,7 @@
         <div class="card kpi"><div class="lbl">بانتظار المراجعة</div><div class="val num" style="color:var(--brand)">${s.pending}</div></div>
         <div class="card kpi"><div class="lbl">طلبات اليوم</div><div class="val num">${s.today}</div></div>
         <div class="card kpi"><div class="lbl">الزبائن</div><div class="val num">${s.customers}</div></div>
+        <a class="card kpi" href="#/repairs"><div class="lbl">🔧 تصليحات مفتوحة</div><div class="val num">${s.open_repairs}</div><div class="muted" style="font-size:12px">مواعيد اليوم: ${s.repairs_today}</div></a>
         <div class="card kpi"><div class="lbl">المنتجات</div><div class="val num">${s.products}</div></div>
       </div>
       <div class="two">
@@ -665,7 +666,7 @@
     const c = layout('security', 'الأمان والنسخ الاحتياطي');
     const [me, backups, log] = await Promise.all([api('/me'), isOwner() ? api('/admin/backups') : [], isOwner() ? api('/admin/log') : []]);
     const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil(b / 1024)} KB`);
-    const ACTIONS = { tradein_model: 'تعديل سعر موديل تبديل', tradein_rules: 'نسب خصم التبديل', tradein_review: 'فحص جهاز تبديل', stock_adjust: 'تعديل المخزن', expense_add: 'إضافة مصروف', expense_delete: 'حذف مصروف', bulk_price: 'تغيير أسعار بالجملة', variant_presets: 'قوالب الأنواع', staff_role: 'تغيير صلاحية موظف', coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
+    const ACTIONS = { repair_status: 'تغيير حالة تصليح', repair_extra: 'طلب كلفة إضافية', repair_price: 'سعر تصليح', tradein_model: 'تعديل سعر موديل تبديل', tradein_rules: 'نسب خصم التبديل', tradein_review: 'فحص جهاز تبديل', stock_adjust: 'تعديل المخزن', expense_add: 'إضافة مصروف', expense_delete: 'حذف مصروف', bulk_price: 'تغيير أسعار بالجملة', variant_presets: 'قوالب الأنواع', staff_role: 'تغيير صلاحية موظف', coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
     c.innerHTML = `
       <div class="card panel" id="tfaPanel"><h3>🔐 التحقق بخطوتين لحسابك</h3>
         ${me.user.totp_enabled ? `<p><span class="st delivered">مفعّل ✓</span> عند الدخول يُطلب رمز من تطبيق Authenticator.</p>
@@ -714,6 +715,150 @@
     if (off) off.onsubmit = async (e) => {
       e.preventDefault();
       try { await api('/me/2fa/disable', { method: 'POST', body: Object.fromEntries(new FormData(off)) }); toast('تم الإيقاف'); security(); } catch (err) { toast(err.message); }
+    };
+  }
+
+  // ---------- repairs ----------
+  const RS = { booked: 'محجوز', received: 'استلمناه', diagnosing: 'قيد الفحص', awaiting_approval: 'بانتظار موافقة الزبون', repairing: 'قيد التصليح', testing: 'اختبار', ready: 'جاهز للتسليم', delivered: 'تم التسليم', cancelled: 'ملغي' };
+  const RQ = { original: 'أصلي', copy: 'بديل', diagnosis: 'بعد الفحص' };
+  const rsCls = (st) => ({ booked: 'pending', received: 'preparing', diagnosing: 'preparing', awaiting_approval: 'cancelled', repairing: 'shipping', testing: 'shipping', ready: 'delivered', delivered: 'delivered', cancelled: 'cancelled' }[st] || 'pending');
+  async function repairs() {
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    const tab = params.get('t') || 'tickets';
+    const c = layout('repairs', 'التصليح', `<div class="tabs-lang">${[['tickets', 'التصليحات'], ['prices', 'قائمة الأسعار'], ...(isOwner() ? [['settings', 'الإعدادات']] : [])].map(([k, l]) => `<a href="#/repairs?t=${k}"><button class="${tab === k ? 'active' : ''}">${l}</button></a>`).join('')}</div>`);
+    if (tab === 'prices') return repairPrices(c);
+    if (tab === 'settings') return repairSettings(c);
+    const filter = params.has('s') ? params.get('s') : 'open';
+    const list = await api(`/admin/repairs?status=${filter}&q=${encodeURIComponent(params.get('q') || '')}`);
+    c.innerHTML = `<div class="toolbar" style="margin-bottom:12px">${[['open', 'المفتوحة'], ['booked', RS.booked], ['awaiting_approval', RS.awaiting_approval], ['ready', RS.ready], ['delivered', RS.delivered], ['', 'الكل']].map(([k, l]) => `<a class="sm-btn ${filter === k ? 'primary' : ''}" href="#/repairs?s=${k}">${l}</a>`).join('')}
+        <input class="input" id="rq" placeholder="بحث: الرمز، الرقم، الاسم، IMEI" value="${esc(params.get('q') || '')}"></div>
+      <div class="card panel">${list.length ? `<table class="t"><thead><tr><th>الرمز</th><th>الزبون</th><th>الجهاز والعطل</th><th>السعر</th><th>الموعد / الاستلام</th><th>الحالة</th><th></th></tr></thead>${list.map((r) => `<tr>
+        <td class="num"><b>${esc(r.code)}</b>${r.warranty_claim ? `<br><span class="pill" style="background:#FFF4E5;color:#D97706" title="نفس الجهاز انصلح سابقاً">🛡️ ضمان ${esc(r.warranty_claim.code)}</span>` : ''}</td>
+        <td>${esc(r.customer_name)}<br><a class="num muted" href="tel:${esc(r.phone)}">${esc(r.phone)}</a></td>
+        <td><b>${esc(`${r.brand} ${r.model}`)}</b><br>${esc((r.service && (r.service.name_ar || r.service.name_ku)) || r.service_label)} <span class="pill">${RQ[r.quality]}</span>${r.problem ? `<br><span class="muted">${esc(r.problem)}</span>` : ''}${r.technician ? `<br><span class="muted">👨‍🔧 ${esc(r.technician)}</span>` : ''}</td>
+        <td class="num"><b>${fmt(r.total)}</b>${r.extra_status === 'pending' ? `<br><span style="color:var(--red)">+${fmt(r.extra_price)} بانتظار الموافقة</span>` : ''}</td>
+        <td class="num">${r.method === 'pickup' ? `🚗 ${esc(r.city || '')}<br><span class="muted">${esc(r.address || '')}</span>` : `🏪 ${esc(r.appointment || '')}`}</td>
+        <td><span class="st ${rsCls(r.status)}">${RS[r.status]}</span></td>
+        <td><div class="row-actions"><button class="sm-btn primary" data-open="${r.id}">إدارة</button><button class="sm-btn" data-label="${r.id}">🏷️</button></div></td></tr>`).join('')}</table>` : '<p class="muted">لا توجد تصليحات</p>'}</div>`;
+    let deb; $('#rq').oninput = () => { clearTimeout(deb); deb = setTimeout(() => { location.hash = `#/repairs?s=${filter}&q=${encodeURIComponent($('#rq').value)}`; }, 500); };
+    c.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => repairForm(list.find((x) => x.id === Number(b.dataset.open))));
+    c.querySelectorAll('[data-label]').forEach((b) => b.onclick = () => printLabel(list.find((x) => x.id === Number(b.dataset.label))));
+  }
+  function printLabel(r) {
+    const w = window.open('', '_blank', 'width=420,height=320');
+    if (!w) return toast('اسمح بالنوافذ المنبثقة');
+    w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(r.code)}</title><style>body{font-family:system-ui,sans-serif;margin:12px}h1{font-size:28px;letter-spacing:3px;margin:0}p{margin:4px 0;font-size:15px}.b{border:2px dashed #000;padding:10px;border-radius:8px}</style></head>
+      <body><div class="b"><h1>${esc(r.code)}</h1><p><b>${esc(r.customer_name)}</b> — ${esc(r.phone)}</p><p>${esc(`${r.brand} ${r.model}`)}</p><p>${esc((r.service && (r.service.name_ar || r.service.name_ku)) || r.service_label)} (${RQ[r.quality]})</p><p>${esc(r.appointment || r.created_at.slice(0, 16))}</p>${r.imei ? `<p>IMEI ${esc(r.imei)}</p>` : ''}</div></body></html>`);
+    w.document.close(); w.focus(); w.print();
+  }
+  function repairForm(r) {
+    let photos = [...(r.photos || [])];
+    const trackUrl = `${location.origin}/#/repairs/${r.code}`;
+    const waMsg = (st) => `مرحبا ${r.customer_name}،\nتصليح ${r.code} (${r.brand} ${r.model}): ${RS[st]}.\n${st === 'ready' ? 'جهازك جاهز للاستلام ✅\n' : ''}${st === 'awaiting_approval' ? 'يرجى الموافقة على الكلفة الإضافية من الرابط:\n' : 'تقدر تتابع من هنا:\n'}${trackUrl}`;
+    const waLink = (st) => `https://wa.me/${String(r.phone).replace(/\D/g, '').replace(/^0/, '964')}?text=${encodeURIComponent(waMsg(st))}`;
+    modal(`تصليح ${esc(r.code)} — ${esc(`${r.brand} ${r.model}`)}`, `
+      <div class="r-head"><span class="st ${rsCls(r.status)}">${RS[r.status]}</span> ${esc((r.service && (r.service.name_ar || r.service.name_ku)) || r.service_label)} · ${RQ[r.quality]} · <b class="num">${fmt(r.total)}</b> د.ع</div>
+      ${r.warranty_claim ? `<div class="card panel warn-box">🛡️ نفس الجهاز (IMEI) انصلح سابقاً برمز <b>${esc(r.warranty_claim.code)}</b> — ${esc(r.warranty_claim.service_label)}، والضمان ساري لغاية ${esc(r.warranty_claim.warranty_until)}.</div>` : ''}
+      <form id="rf"><div class="fgrid">
+        <div class="field"><label>الحالة</label><select class="input" name="status" ${r.status === 'delivered' ? 'disabled' : ''}>${Object.entries(RS).map(([k, l]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label>الفني</label><input class="input" name="technician" value="${esc(r.technician || '')}"></div>
+        <div class="field"><label>IMEI (اكتب *#06#)</label><input class="input num" dir="ltr" name="imei" value="${esc(r.imei || '')}"></div>
+        <div class="field"><label>السعر النهائي (اتركه فارغاً = ${fmt(r.quoted_price + r.approved_extra)})</label><input class="input num" type="number" min="0" name="final_price" value="${r.final_price ?? ''}"></div>
+        <div class="field"><label>كلفة القطع (سري، للربح)</label><input class="input num" type="number" min="0" name="parts_cost" value="${r.parts_cost ?? ''}"></div>
+        <div class="field"><label>ملاحظة على الحالة</label><input class="input" name="note" placeholder="مثلاً: تم تبديل الشاشة واختبار اللمس"></div>
+        <div class="field full"><label>صور قبل/بعد (يشوفها الزبون)</label><label class="sm-btn" style="cursor:pointer;display:inline-block">+ رفع صور<input type="file" accept="image/*" multiple hidden id="rUp"></label><div class="gallery-list" id="rGal"></div></div>
+      </div>
+      <div class="toggles"><label><input type="checkbox" name="old_part_returned" ${r.old_part_returned ? 'checked' : ''}> سلّمنا القطعة القديمة للزبون</label></div>
+      <button class="btn btn-primary btn-block">حفظ</button></form>
+      <div class="r-actions">
+        <a class="sm-btn primary" style="background:#25D366" target="_blank" rel="noopener" href="${esc(waLink(r.status))}" id="waUp">💬 إرسال التحديث بالواتساب</a>
+        ${['received', 'diagnosing', 'repairing'].includes(r.status) ? '<button class="sm-btn" id="askExtra">➕ طلب كلفة إضافية من الزبون</button>' : ''}
+      </div>
+      <div id="extraBox"></div>
+      <h3 style="margin:16px 0 8px;font-size:15px">السجل</h3><table class="t">${(r.events || []).map((e) => `<tr><td class="num muted" style="white-space:nowrap">${esc(e.created_at.slice(0, 16))}</td><td>${esc(RS[e.status] || e.status)}</td><td class="muted">${esc(e.note || '')}</td></tr>`).join('')}</table>`, (m, close) => {
+      const drawGal = () => {
+        m.querySelector('#rGal').innerHTML = photos.map((g, i) => `<span><img src="${safeImg(g)}"><button type="button" data-rmp="${i}">×</button></span>`).join('');
+        m.querySelectorAll('[data-rmp]').forEach((b) => b.onclick = () => { photos.splice(Number(b.dataset.rmp), 1); drawGal(); });
+      };
+      drawGal();
+      m.querySelector('#rUp').onchange = async (e) => { for (const f of e.target.files) { try { photos.push(await upload(f)); } catch (err) { toast(err.message); } } drawGal(); };
+      m.querySelector('[name=status]').onchange = (e) => { m.querySelector('#waUp').href = waLink(e.target.value); };
+      m.querySelector('#rf').onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target); const body = Object.fromEntries(fd);
+        body.old_part_returned = fd.has('old_part_returned'); body.photos = photos;
+        if (r.status === 'delivered') delete body.status;
+        try { await api(`/admin/repairs/${r.id}`, { method: 'PUT', body }); toast('تم الحفظ'); close(); repairs(); } catch (err) { toast(err.message); }
+      };
+      const ask = m.querySelector('#askExtra');
+      if (ask) ask.onclick = () => {
+        m.querySelector('#extraBox').innerHTML = `<form id="exf" class="card panel" style="margin-top:10px"><div class="fgrid"><div class="field"><label>الكلفة الإضافية (د.ع)</label><input class="input num" type="number" min="1" name="price" required></div>
+          <div class="field"><label>السبب (يشوفه الزبون)</label><input class="input" name="note" required placeholder="مثلاً: فليكس الشحن متضرر"></div></div>
+          <p class="muted">التصليح يتوقف لين الزبون يوافق من صفحة التتبع. ما ينحسب أي مبلغ بدون موافقته.</p><button class="btn btn-primary">إرسال للزبون</button></form>`;
+        m.querySelector('#exf').onsubmit = async (e) => {
+          e.preventDefault();
+          try { await api(`/admin/repairs/${r.id}/extra`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast('تم الإرسال — بلّغ الزبون بالواتساب'); close(); repairs(); } catch (err) { toast(err.message); }
+        };
+      };
+    });
+  }
+  async function repairPrices(c) {
+    const { services, prices } = await api('/admin/repair-prices');
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    const models = [...new Set(prices.map((p) => `${p.brand}|${p.model}`))];
+    const sel = params.get('m') || models[0] || '';
+    const [brand, model] = sel.split('|');
+    const rows = services.map((sv) => ({ sv, p: prices.find((p) => p.brand === brand && p.model === model && p.service_id === sv.id) }));
+    c.innerHTML = `<div class="card panel warn-box">⚠️ الأسعار الحالية <b>تجريبية</b> — حدّثها حسب أسعارك. اترك «بديل» فارغاً إذا ما تبيع قطعة بديلة. الأعطال اللي «بعد الفحص» ما تحتاج سعر.</div>
+      <div class="toolbar" style="margin-bottom:12px"><select class="input sm" id="pm" style="min-width:260px">${models.map((m) => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(m.replace('|', ' '))}</option>`).join('')}</select>
+        <button class="sm-btn primary" id="addModel">+ موديل جديد</button></div>
+      <div class="card panel"><table class="t var-table"><thead><tr><th>العطل</th><th>أصلي (د.ع)</th><th>بديل (د.ع)</th><th>المدة (دقيقة)</th><th>ضمان الأصلي (يوم)</th><th>ضمان البديل (يوم)</th><th></th></tr></thead>
+      ${rows.map(({ sv, p }) => sv.needs_diagnosis ? `<tr><td>${esc(sv.name_ar || sv.name_ku)}</td><td colspan="6" class="muted">السعر بعد الفحص</td></tr>` : `<tr data-svc="${sv.id}" data-pid="${p ? p.id : ''}">
+        <td><b>${esc(sv.name_ar || sv.name_ku)}</b></td>
+        <td><input class="input sm num" type="number" min="0" name="price_original" value="${p?.price_original ?? ''}"></td>
+        <td><input class="input sm num" type="number" min="0" name="price_copy" value="${p?.price_copy ?? ''}"></td>
+        <td><input class="input sm num" type="number" min="5" name="duration_min" value="${p?.duration_min ?? 60}" style="width:80px"></td>
+        <td><input class="input sm num" type="number" min="0" name="warranty_original" value="${p?.warranty_original ?? 90}" style="width:80px"></td>
+        <td><input class="input sm num" type="number" min="0" name="warranty_copy" value="${p?.warranty_copy ?? 30}" style="width:80px"></td>
+        <td><button class="sm-btn primary" data-save>حفظ</button></td></tr>`).join('')}</table></div>`;
+    $('#pm').onchange = () => { location.hash = `#/repairs?t=prices&m=${encodeURIComponent($('#pm').value)}`; };
+    c.querySelectorAll('[data-save]').forEach((b) => b.onclick = async () => {
+      const tr = b.closest('tr'); const body = { service_id: tr.dataset.svc, brand, model };
+      tr.querySelectorAll('input').forEach((i) => { body[i.name] = i.value; });
+      try { await api(tr.dataset.pid ? `/admin/repair-prices/${tr.dataset.pid}` : '/admin/repair-prices', { method: tr.dataset.pid ? 'PUT' : 'POST', body }); toast('تم الحفظ'); repairPrices(c); } catch (e) { toast(e.message); }
+    });
+    $('#addModel').onclick = () => modal('موديل جديد', `<form id="nm"><div class="fgrid"><div class="field"><label>الماركة</label><input class="input" name="brand" required placeholder="Apple"></div>
+      <div class="field"><label>الموديل</label><input class="input" name="model" required placeholder="iPhone 16"></div></div><button class="btn btn-primary btn-block">إضافة</button></form>`, (m, close) => {
+      m.querySelector('#nm').onsubmit = async (e) => {
+        e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+        const first = services.find((x) => !x.needs_diagnosis);
+        try { await api('/admin/repair-prices', { method: 'POST', body: { service_id: first.id, brand: f.brand, model: f.model, price_original: '', price_copy: '' } }); close(); location.hash = `#/repairs?t=prices&m=${encodeURIComponent(`${f.brand}|${f.model}`)}`; } catch (err) { toast(err.message); }
+      };
+    });
+  }
+  async function repairSettings(c) {
+    const st = await api('/admin/settings');
+    const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const closed = String(st.repair_closed_days || '').split(',').filter(Boolean).map(Number);
+    c.innerHTML = `<form class="card panel" id="rsf" style="max-width:760px">
+      <div class="toggles"><label><input type="checkbox" name="repair_enabled" ${st.repair_enabled === '1' ? 'checked' : ''}> تفعيل قسم التصليح بالمتجر</label>
+        <label><input type="checkbox" name="repair_pickup" ${st.repair_pickup === '1' ? 'checked' : ''}> استلام من البيت</label>
+        <label><input type="checkbox" name="repair_free_diagnosis" ${st.repair_free_diagnosis === '1' ? 'checked' : ''}> الفحص مجاني</label></div>
+      <div class="fgrid">
+        <div class="field"><label>أجور الاستلام والإرجاع (د.ع)</label><input class="input num" type="number" min="0" name="repair_pickup_fee" value="${esc(st.repair_pickup_fee || 0)}"></div>
+        <div class="field"><label>النصيحة الصادقة: إذا التصليح أكثر من (%) من قيمة الجهاز</label><input class="input num" type="number" min="10" max="100" name="repair_honest_pct" value="${esc(st.repair_honest_pct || 50)}"></div>
+        <div class="field"><label>يفتح الساعة</label><input class="input num" type="number" min="0" max="23" name="repair_open" value="${esc(st.repair_open || 10)}"></div>
+        <div class="field"><label>يسد الساعة</label><input class="input num" type="number" min="1" max="24" name="repair_close" value="${esc(st.repair_close || 21)}"></div>
+        <div class="field"><label>عدد الزبائن بكل ساعة</label><input class="input num" type="number" min="1" name="repair_slot_capacity" value="${esc(st.repair_slot_capacity || 2)}"></div>
+        <div class="field full"><label>أيام العطلة</label><div class="toggles">${days.map((d, i) => `<label><input type="checkbox" data-day="${i}" ${closed.includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
+      </div><button class="btn btn-primary">حفظ</button></form>`;
+    $('#rsf').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target; const body = {};
+      ['repair_pickup_fee', 'repair_honest_pct', 'repair_open', 'repair_close', 'repair_slot_capacity'].forEach((k) => { body[k] = f[k].value; });
+      ['repair_enabled', 'repair_pickup', 'repair_free_diagnosis'].forEach((k) => { body[k] = f[k].checked ? '1' : '0'; });
+      body.repair_closed_days = [...f.querySelectorAll('[data-day]:checked')].map((x) => x.dataset.day).join(',');
+      try { await api('/admin/settings', { method: 'PUT', body }); toast('تم الحفظ'); } catch (err) { toast(err.message); }
     };
   }
 
@@ -959,7 +1104,7 @@
     const c = layout('staff', 'مدراء النظام', '<button class="btn btn-primary" id="addS">+ إضافة موظف</button>');
     const list = await api('/admin/staff');
     c.innerHTML = `<div class="card panel" style="background:#FFFBF7;border:2px solid #FBE2D3">💡 كل موظف يشوف بس الأقسام اللي تخص شغله. الموظف لازم يسجّل بالمتجر أولاً، بعدها تضيفه هنا برقمه. أنصح كل موظف يفعّل التحقق بخطوتين.
-        <ul style="margin:8px 0 0;line-height:1.9"><li><b>مدير:</b> كل شي عدا الإعدادات والموظفين والنسخ الاحتياطي</li><li><b>موظف طلبات:</b> الطلبات، الزبائن، السلات المتروكة</li><li><b>موظف منتجات ومخزن:</b> المنتجات، الأقسام، حركة المخزن</li></ul></div>
+        <ul style="margin:8px 0 0;line-height:1.9"><li><b>مدير:</b> كل شي عدا الإعدادات والموظفين والنسخ الاحتياطي</li><li><b>موظف طلبات:</b> الطلبات، الزبائن، السلات المتروكة</li><li><b>موظف منتجات ومخزن:</b> المنتجات، الأقسام، حركة المخزن</li><li><b>فني تصليح:</b> التصليحات بس</li></ul></div>
       <div class="card panel"><table class="t"><thead><tr><th>الاسم</th><th>الموبايل</th><th>الصلاحية</th><th>تحقق بخطوتين</th><th></th></tr></thead>${list.map((u) => `<tr>
         <td><b>${esc(u.name)}</b></td><td class="num">${esc(u.phone)}</td>
         <td>${u.id === ME.user.id ? `<span class="pill">${esc(ROLES[u.role])}</span> (أنت)` : `<select class="input sm" data-role="${u.id}">${Object.entries(ROLES).map(([k, l]) => `<option value="${k}" ${k === u.role ? 'selected' : ''}>${l}</option>`).join('')}<option value="customer">— إزالة من الموظفين —</option></select>`}</td>
@@ -1004,7 +1149,7 @@
   }
 
   // ---------- router ----------
-  const ROUTES = { tradein, dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
+  const ROUTES = { repairs, tradein, dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
   async function render() {
     if (!token) return showLogin();
     if (!ME) { try { ME = await api('/me'); } catch { return; } if (ME.user.role === 'customer') return showLogin(ERR.forbidden); }

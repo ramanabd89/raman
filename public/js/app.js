@@ -47,6 +47,7 @@
     help: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 14.5a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5ZM12 6a3.5 3.5 0 0 0-3.5 3.5h2a1.5 1.5 0 1 1 2.2 1.3c-.9.5-1.7 1.3-1.7 2.7v.5h2v-.4c0-.6.3-.9.9-1.3A3.5 3.5 0 0 0 12 6Z"/></svg>',
     swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>',
     spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 2 9.4 7.4 4 9l5.4 1.6L11 16l1.6-5.4L18 9l-5.4-1.6L11 2Zm7 11-.9 2.6-2.6.9 2.6.9.9 2.6.9-2.6 2.6-.9-2.6-.9L18 13Z"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.7 6.3a1 1 0 0 0-1.6-.3l-2.6 2.6-2-.4-.4-2 2.6-2.6a1 1 0 0 0-.3-1.6 6 6 0 0 0-7.9 7.6l-6.7 6.7a2.5 2.5 0 0 0 3.5 3.5l6.7-6.7a6 6 0 0 0 7.6-7.9Z"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
@@ -208,6 +209,7 @@
           ${item('#', I.search, 'y', T('search'), false, 'data-open-search')}
           ${item('#/finder', I.spark, 'p', T('finderTitle'), route === 'finder')}
           ${S.settings.tradein_enabled === '1' ? item('#/tradein', I.swap, 'g', T('tiTitle'), route === 'tradein') : ''}
+          ${S.settings.repair_enabled === '1' ? item('#/repair', I.wrench, 'o', T('repairTitle'), route === 'repair' || route === 'repairs') : ''}
           ${item('#/faq', I.help, 'b', T('faq'), route === 'faq')}
           ${u && u.role && u.role !== 'customer' ? item(esc(S.adminPath || '/admin'), I.admin, 'r', T('adminPanel'), false) : ''}
         </div>
@@ -361,6 +363,7 @@
         <div class="promo-tiles">
           <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b><small>${T('finderSub')}</small></a>
           ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b><small>${T('tiCheck')}</small></a>` : ''}
+          ${S.settings.repair_enabled === '1' ? `<a class="promo-tile repair" href="#/repair"><span class="pi">${I.wrench}</span><b>${T('repairTitle')}</b><small>${T('repairSub')}</small></a>` : ''}
         </div>
         <div id="flash"></div>
         <div class="sort-tabs" id="sortTabs"></div>
@@ -947,6 +950,7 @@
         </div>
         <div class="card menu-list">
           <a class="menu-item" href="#invite"><span class="mi y">${I.gift}</span>${T('invite')}<span class="chev">${I.chev}</span></a>
+          ${S.settings.repair_enabled === '1' ? `<a class="menu-item" href="#/repairs"><span class="mi o">${I.wrench}</span>${T('myRepairs')}<span class="chev">${I.chev}</span></a>` : ''}
           <a class="menu-item" href="#/addresses"><span class="mi o">${I.map}</span>${T('addresses')}<span class="chev">${I.chev}</span></a>
           <a class="menu-item" href="#/edit-profile"><span class="mi g">${I.shield}</span>${T('editProfile')}<span class="chev">${I.chev}</span></a>
           <a class="menu-item" href="#/support"><span class="mi b">${I.headset}</span>${T('support')}<span class="chev">${I.chev}</span></a>
@@ -1083,6 +1087,203 @@
       ${s.whatsapp ? `<a class="btn btn-block" style="background:#25D366;color:#fff;margin-bottom:12px" target="_blank" rel="noopener" href="https://wa.me/${esc(String(s.whatsapp).replace(/\D/g, ''))}">${I.whatsapp}${T('contactWhatsapp')}</a>` : ''}
       ${s.support_phone ? `<a class="btn btn-soft btn-block" href="tel:${esc(s.support_phone)}">${I.phone}${T('callUs')} <span class="num">${esc(s.support_phone)}</span></a>` : ''}
     </div>`;
+  }
+
+  // ================= repair =================
+  const SVC_ICON = { screen: '📱', battery: '🔋', charging: '🔌', back: '🪟', camera: '📷', audio: '🔊', water: '💧', software: '⚙️', other: '🛠️' };
+  async function viewRepair(resume) {
+    app.innerHTML = '<div class="spinner"></div>';
+    const cat = await api('/repair/catalog').catch(() => ({ enabled: false }));
+    if (!cat.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_repair_disabled')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
+    let st = { brand: null, model: null, service: null, quote: null, quality: null, problem: '', method: 'walkin', day: null, slot: null, city: '', address: '' };
+    if (resume) { const d = store.get('repair_draft', null); if (d) st = { ...st, ...d }; store.del('repair_draft'); }
+    const wa = String(S.settings.whatsapp || '').replace(/\D/g, '');
+    const shell = (title, body, n) => `${pageHead(T('repairTitle'))}<div class="container wizard"><div class="wz-progress"><i style="width:${n * 20}%"></i></div><div class="wz-step">${esc(T('step', { x: n, y: 5 }))}</div><h2 class="wz-q">${title}</h2>${body}</div>`;
+    const svcName = (sv) => L(sv, 'name');
+    const intro = () => {
+      const promises = [['p_price', I.money], ['p_approval', I.check], ['p_oldpart', I.swap], ['p_warranty', I.shield], ['p_free', I.gift], ['p_front', I.clock]];
+      app.innerHTML = `${pageHead(T('repairTitle'))}<div class="container wizard">
+        <div class="repair-hero"><div class="rh-ic">${I.wrench}</div><h2>${T('repairTitle')}</h2><p>${T('repairSub')}</p>
+          <button class="btn btn-primary" id="startR">${T('repairStart')}</button></div>
+        <div class="promises">${promises.map(([k, ic]) => `<div class="promise">${ic}<span>${T(k)}</span></div>`).join('')}</div>
+        <div class="card how"><h3>${T('howTitle')}</h3><ol>${['how1', 'how2', 'how3', 'how4'].map((k) => `<li>${T(k)}</li>`).join('')}</ol></div>
+        <details class="card faq"><summary>🔒 ${T('privacyTitle')}</summary><p>${esc(T('privacyText'))}</p></details>
+        <div class="repair-links"><a href="#/repairs">${I.wrench}${T('myRepairs')}</a><a href="#/warranty">${I.shield}${T('checkWarranty')}</a></div></div>`;
+      $('#startR').onclick = s1;
+    };
+    const brands = [...new Set(cat.models.map((m) => m.brand))];
+    const s1 = () => {
+      app.innerHTML = shell(T('rModel'), `<div class="wz-options">${brands.map((b) => `<button class="wz-opt ${st.brand === b ? 'on' : ''}" data-b="${esc(b)}">${esc(b)}</button>`).join('')}</div>
+        <div id="mdl"></div>${wa ? `<a class="wz-link" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent(T('repairTitle'))}">${T('modelNotListed')}</a>` : ''}`, 1);
+      const drawModels = () => {
+        if (!st.brand) return;
+        $('#mdl').innerHTML = `<div class="wz-options list" style="margin-top:12px">${cat.models.filter((m) => m.brand === st.brand).map((m) => `<button class="wz-opt" data-m="${esc(m.model)}">${esc(m.model)}</button>`).join('')}</div>`;
+        app.querySelectorAll('[data-m]').forEach((b) => b.onclick = () => { st.model = b.dataset.m; s2(); });
+      };
+      app.querySelectorAll('[data-b]').forEach((b) => b.onclick = () => { st.brand = b.dataset.b; app.querySelectorAll('[data-b]').forEach((x) => x.classList.toggle('on', x === b)); drawModels(); });
+      drawModels();
+    };
+    const s2 = () => {
+      app.innerHTML = shell(T('rIssue'), `<div class="svc-grid">${cat.services.map((sv) => `<button class="svc" data-s="${sv.id}"><span>${SVC_ICON[sv.key] || '🛠️'}</span>${esc(svcName(sv))}</button>`).join('')}</div>
+        <button class="btn btn-soft wz-back">${T('back')}</button>`, 2);
+      app.querySelectorAll('[data-s]').forEach((b) => b.onclick = async () => { st.service = cat.services.find((x) => x.id === Number(b.dataset.s)); await s3(); });
+      app.querySelector('.wz-back').onclick = s1;
+    };
+    const s3 = async () => {
+      app.innerHTML = '<div class="spinner"></div>';
+      st.quote = await api(`/repair/quote?${new URLSearchParams({ brand: st.brand, model: st.model, service: st.service.id })}`);
+      const q = st.quote;
+      if (q.options.length === 1) st.quality = q.options[0].quality;
+      app.innerHTML = shell(`${esc(st.model)} — ${esc(svcName(st.service))}`, `
+        ${q.advice ? `<div class="advice">${I.help}<div><b>${T('adviceTitle')}</b><p>${esc(T('adviceText', { r: `${fmt(q.advice.repair_price)} ${T('currency')}`, v: `${fmt(q.advice.phone_value)} ${T('currency')}` }))}</p>
+          ${S.settings.tradein_enabled === '1' ? `<a class="btn btn-soft" href="#/tradein">${I.swap}${T('adviceBtn')}</a>` : ''}</div></div>` : ''}
+        <div class="r-options">${q.options.map((o) => `<button class="r-opt ${st.quality === o.quality ? 'on' : ''}" data-rq="${o.quality}">
+          <div class="ro-top"><b>${T(`q_${o.quality}`)}</b>${o.quality === 'diagnosis' ? `<span class="free">${T('free')}</span>` : money(o.price)}</div>
+          <div class="ro-meta"><span>${I.shield}${esc(T('warrantyDays', { x: o.warranty_days }))}</span>${q.duration_min ? `<span>${I.clock}${esc(T('durationMin', { x: q.duration_min }))}</span>` : ''}${q.duration_min && q.duration_min <= 60 ? `<span class="front">${I.check}${T('inFront')}</span>` : ''}</div></button>`).join('')}</div>
+        ${q.needs_diagnosis || cat.free_diagnosis ? `<p class="ti-note">${I.gift}<span>${T('freeDiag')}</span></p>` : ''}
+        <div class="field"><label>${T('problemLbl')}</label><textarea class="input" id="prob">${esc(st.problem)}</textarea></div>
+        <button class="btn btn-primary btn-block" id="n3" ${st.quality ? '' : 'disabled'}>${T('next')}</button><button class="btn btn-soft wz-back">${T('back')}</button>`, 3);
+      app.querySelectorAll('[data-rq]').forEach((b) => b.onclick = () => { st.quality = b.dataset.rq; app.querySelectorAll('[data-rq]').forEach((x) => x.classList.toggle('on', x === b)); $('#n3').disabled = false; });
+      $('#n3').onclick = () => { st.problem = $('#prob').value; s4(); };
+      app.querySelector('.wz-back').onclick = s2;
+    };
+    const s4 = async () => {
+      const days = []; const base = new Date(Date.now() + 3 * 3600e3);
+      for (let i = 0; i < 7; i++) days.push(new Date(base.getTime() + i * 864e5).toISOString().slice(0, 10));
+      if (!st.day) st.day = days[0];
+      const loc = S.lang === 'en' ? 'en-GB' : 'ar-IQ';
+      const dayLbl = (d) => { const x = new Date(`${d}T12:00:00Z`); return `<b>${x.toLocaleDateString(loc, { weekday: 'short', timeZone: 'UTC' })}</b><small class="num">${d.slice(8)}/${d.slice(5, 7)}</small>`; };
+      app.innerHTML = shell(T('rMethod'), `
+        <div class="wz-options"><button class="wz-opt ${st.method === 'walkin' ? 'on' : ''}" data-meth="walkin">🏪 ${T('walkin')}</button>
+          ${cat.pickup ? `<button class="wz-opt ${st.method === 'pickup' ? 'on' : ''}" data-meth="pickup">🚗 ${T('pickup')}<br><small>${esc(T('pickupFee', { x: `${fmt(cat.pickup_fee)} ${T('currency')}` }))}</small></button>` : ''}</div>
+        <div id="methBox" style="margin-top:14px"></div>
+        <button class="btn btn-primary btn-block" id="n4" style="margin-top:14px">${T('next')}</button><button class="btn btn-soft wz-back">${T('back')}</button>`, 4);
+      const draw = async () => {
+        const box = $('#methBox');
+        if (st.method === 'pickup') {
+          box.innerHTML = `<div class="field"><label>${T('city')}</label><select class="input" id="rcity">${zones().map((z) => `<option ${z.name === st.city ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select></div>
+            <div class="field"><label>${T('address')}</label><input class="input" id="raddr" value="${esc(st.address)}"></div>`;
+          return;
+        }
+        box.innerHTML = `<div class="section-title" style="font-size:15px;margin:0 0 8px">${T('chooseDay')}</div><div class="days">${days.map((d) => `<button class="day ${st.day === d ? 'on' : ''}" data-day="${d}">${dayLbl(d)}</button>`).join('')}</div>
+          <div class="section-title" style="font-size:15px;margin:14px 0 8px">${T('chooseTime')}</div><div id="slots"><div class="spinner" style="margin:10px auto"></div></div>`;
+        box.querySelectorAll('[data-day]').forEach((b) => b.onclick = () => { st.day = b.dataset.day; st.slot = null; draw(); });
+        const slots = await api(`/repair/slots?date=${st.day}`).catch(() => []);
+        $('#slots').innerHTML = slots.length ? `<div class="slots">${slots.map((x) => `<button class="slot ${st.slot === x.slot ? 'on' : ''}" data-slot="${x.slot}" ${x.free ? '' : 'disabled'}><span class="num">${x.time}</span>${x.free ? '' : `<small>${T('full')}</small>`}</button>`).join('')}</div>` : `<p class="muted-lbl">${T('noSlots')}</p>`;
+        $('#slots').querySelectorAll('[data-slot]').forEach((b) => b.onclick = () => { st.slot = b.dataset.slot; $('#slots').querySelectorAll('[data-slot]').forEach((x) => x.classList.toggle('on', x === b)); });
+      };
+      app.querySelectorAll('[data-meth]').forEach((b) => b.onclick = () => { st.method = b.dataset.meth; app.querySelectorAll('[data-meth]').forEach((x) => x.classList.toggle('on', x === b)); draw(); });
+      $('#n4').onclick = () => {
+        if (st.method === 'pickup') { st.city = $('#rcity').value; st.address = $('#raddr').value.trim(); if (!st.address) return toast(T('err_invalid_input')); }
+        else if (!st.slot) return toast(T('chooseTime'));
+        s5();
+      };
+      app.querySelector('.wz-back').onclick = s3;
+      draw();
+    };
+    const s5 = () => {
+      const o = st.quote.options.find((x) => x.quality === st.quality);
+      const fee = st.method === 'pickup' ? cat.pickup_fee : 0;
+      app.innerHTML = shell(T('rSummary'), `<div class="card summary" style="position:static">
+          <div class="sum-row"><span>${T('rModel')}</span><b>${esc(`${st.brand} ${st.model}`)}</b></div>
+          <div class="sum-row"><span>${T('rIssue')}</span><b>${esc(svcName(st.service))}</b></div>
+          <div class="sum-row"><span>${T(`q_${st.quality}`)}</span>${o.quality === 'diagnosis' ? `<b>${T('q_diagnosis')}</b>` : money(o.price)}</div>
+          <div class="sum-row"><span>${T('certTitle')}</span><b>${esc(T('warrantyDays', { x: o.warranty_days }))}</b></div>
+          <div class="sum-row"><span>${st.method === 'pickup' ? T('pickup') : T('walkin')}</span><b class="num">${esc(st.method === 'pickup' ? `${st.city} — ${st.address}` : st.slot)}</b></div>
+          ${fee ? `<div class="sum-row"><span>${esc(T('pickupFee', { x: '' }))}</span>${money(fee)}</div>` : ''}
+          ${o.quality !== 'diagnosis' ? `<div class="sum-row total"><span>${T('total')}</span>${money(o.price + fee)}</div>` : ''}
+          <p class="ti-note">${I.check}<span>${T('p_approval')}</span></p>
+          <button class="btn btn-primary btn-block" id="book">${I.wrench}${T('confirmRepair')}</button></div>
+          <button class="btn btn-soft wz-back">${T('back')}</button>`, 5);
+      app.querySelector('.wz-back').onclick = s4;
+      $('#book').onclick = async () => {
+        if (!S.user) { store.set('repair_draft', st); location.hash = `#/quick?next=${encodeURIComponent('repair?resume=1')}`; return; }
+        const btn = $('#book'); btn.disabled = true;
+        try {
+          const r = await api('/repairs', { method: 'POST', body: { brand: st.brand, model: st.model, service_id: st.service.id, quality: st.quality, method: st.method, appointment: st.slot, city: st.city, address: st.address, problem: st.problem } });
+          toast(T('repairBooked'));
+          location.hash = `#/repairs/${r.code}`;
+        } catch (e) { btn.disabled = false; toast(errMsg(e)); if (e.code === 'repair_slot') s4(); }
+      };
+    };
+    if (resume && st.quote && st.quality) s5(); else intro();
+  }
+
+  async function viewRepairs(code) {
+    if (!S.user) { location.hash = '#/quick?next=repairs'; return; }
+    if (code) return viewRepairTicket(code);
+    app.innerHTML = `${pageHead(T('myRepairs'))}<div class="container" style="padding-top:16px" id="rl"><div class="spinner"></div></div>`;
+    const list = await api('/repairs').catch(() => []);
+    $('#rl').innerHTML = list.length ? list.map((r) => `<a class="card order-card" href="#/repairs/${esc(r.code)}">
+        <div class="hd"><div><b class="num">${esc(r.code)}</b><div class="date">${esc(`${r.brand} ${r.model}`)} · ${esc(L(r.service, 'name'))}</div></div><span class="st ${rStCls(r.status)}">${T(`rs_${r.status}`)}</span></div>
+        <div class="ft"><span>${esc(r.appointment || r.city || '')}</span>${r.quality === 'diagnosis' && r.final_price == null ? `<b>${T('q_diagnosis')}</b>` : money(r.total)}</div></a>`).join('')
+      : `<div class="empty"><div class="ic sq">${I.wrench}</div><h3>${T('noRepairs')}</h3><a class="btn btn-primary" href="#/repair">${T('repairStart')}</a></div>`;
+  }
+  const rStCls = (s) => ({ booked: 'pending', received: 'preparing', diagnosing: 'preparing', awaiting_approval: 'cancelled', repairing: 'shipping', testing: 'shipping', ready: 'delivered', delivered: 'delivered', cancelled: 'cancelled' }[s] || 'pending');
+
+  async function viewRepairTicket(code) {
+    app.innerHTML = '<div class="spinner"></div>';
+    let r;
+    try { r = await api(`/repairs/${encodeURIComponent(code)}`); } catch { location.hash = '#/repairs'; return; }
+    const flow = ['booked', 'received', 'diagnosing', 'repairing', 'testing', 'ready', 'delivered'];
+    const cur = r.status === 'awaiting_approval' ? flow.indexOf('diagnosing') : flow.indexOf(r.status);
+    const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    const valid = r.warranty_until && r.warranty_until >= today;
+    app.innerHTML = `${pageHead(esc(T('repairNo', { x: r.code })), `<span class="st ${rStCls(r.status)}">${T(`rs_${r.status}`)}</span>`)}
+      <div class="container cart-layout"><div>
+        ${r.status === 'awaiting_approval' && r.extra_status === 'pending' ? `<div class="card approval"><b>${T('extraTitle')}</b><p>${esc(r.extra_note || '')}</p>
+          <div class="ex-price">${esc(T('extraAsk', { x: `${fmt(r.extra_price)} ${T('currency')}` }))}</div>
+          <div class="fd-actions"><button class="btn btn-soft" data-dec="0">${T('reject')}</button><button class="btn btn-primary" data-dec="1">${T('approve')}</button></div>
+          <small>${T('extraRejectedNote')}</small></div>` : ''}
+        ${r.status !== 'cancelled' ? `<div class="card r-timeline">${flow.map((st, i) => `<div class="rt ${i <= cur ? 'done' : ''} ${i === cur ? 'cur' : ''}"><i></i><span>${T(`rs_${st}`)}</span></div>`).join('')}</div>` : ''}
+        ${r.photos.length ? `<div class="card" style="padding:16px;margin-bottom:14px"><h3 style="margin:0 0 10px;font-size:16px">${T('photosTitle')}</h3><div class="r-photos">${r.photos.map((p) => `<a href="${img(p)}" target="_blank" rel="noopener"><img src="${img(p)}" alt=""></a>`).join('')}</div></div>` : ''}
+        ${r.status === 'delivered' && r.warranty_until ? `<div class="card cert" id="cert"><div class="cert-hd">${I.shield}<b>${T('certTitle')}</b></div>
+          <div class="cert-code num">${esc(r.code)}</div><div class="cert-dev">${esc(`${r.brand} ${r.model}`)} · ${esc(L(r.service, 'name'))} · ${T(`q_${r.quality}`)}</div>
+          <div class="cert-valid ${valid ? 'ok' : 'no'}">${valid ? esc(T('validUntil', { x: r.warranty_until })) : T('expired')}</div>
+          <div id="qr"></div><div class="cert-url num">${esc(`${location.origin}/#/warranty/${r.code}`)}</div>
+          ${r.old_part_returned ? `<div class="ti-note" style="justify-content:center">${I.check}<span>${T('oldPartBack')}</span></div>` : ''}
+          <button class="btn btn-soft" id="printCert">${T('printCert')}</button></div>` : ''}
+      </div>
+      <div class="card summary">
+        <div class="sum-row"><span>${T('rModel')}</span><b>${esc(`${r.brand} ${r.model}`)}</b></div>
+        <div class="sum-row"><span>${T('rIssue')}</span><b>${esc(L(r.service, 'name'))}</b></div>
+        <div class="sum-row"><span>${T(`q_${r.quality}`)}</span>${r.quality === 'diagnosis' && r.final_price == null ? `<b>${T('q_diagnosis')}</b>` : money(r.quoted_price)}</div>
+        ${r.approved_extra ? `<div class="sum-row"><span>+ ${esc(r.extra_note || '')}</span>${money(r.approved_extra)}</div>` : ''}
+        ${r.pickup_fee ? `<div class="sum-row"><span>${esc(T('pickupFee', { x: '' }))}</span>${money(r.pickup_fee)}</div>` : ''}
+        <div class="sum-row total"><span>${T('total')}</span>${money(r.total)}</div>
+        <div class="sum-row"><span>${r.method === 'pickup' ? T('pickup') : T('walkin')}</span><b class="num">${esc(r.appointment || `${r.city || ''} — ${r.address || ''}`)}</b></div>
+        <div class="sum-row"><span>${T('certTitle')}</span><b>${esc(T('warrantyDays', { x: r.warranty_days }))}</b></div>
+        ${r.status === 'booked' ? `<button class="btn btn-danger btn-block" id="rCancel" style="margin-top:10px">${T('cancelOrder')}</button>` : ''}
+      </div></div>`;
+    app.querySelectorAll('[data-dec]').forEach((b) => b.onclick = async () => {
+      try { await api(`/repairs/${r.code}/decision`, { method: 'POST', body: { approve: b.dataset.dec === '1' } }); viewRepairTicket(r.code); } catch (e) { toast(errMsg(e)); }
+    });
+    if ($('#rCancel')) $('#rCancel').onclick = async () => { if (!confirm(T('confirmCancel'))) return; await api(`/repairs/${r.code}/cancel`, { method: 'POST' }).catch(() => {}); viewRepairTicket(r.code); };
+    if ($('#printCert')) $('#printCert').onclick = () => window.print();
+    if ($('#qr')) drawQr($('#qr'), `${location.origin}/#/warranty/${r.code}`);
+  }
+  // QR code for the warranty certificate (library loaded only when needed; the link text is shown anyway).
+  function drawQr(el, text) {
+    const go = () => { try { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); el.innerHTML = q.createSvgTag({ cellSize: 4, margin: 2 }); } catch { /* no QR */ } };
+    if (window.qrcode) return go();
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js'; sc.onload = go; document.head.appendChild(sc);
+  }
+
+  async function viewWarranty(code) {
+    app.innerHTML = `${pageHead(T('checkWarranty'))}<div class="container" style="max-width:520px;padding-top:20px">
+      <form class="card" id="wf" style="padding:20px"><div class="field"><label>${T('warrantyCode')}</label><input class="input num" name="code" value="${esc(code || '')}" placeholder="RXXXXXX" style="text-transform:uppercase;text-align:start" required></div>
+      <button class="btn btn-primary btn-block">${I.shield}${T('check')}</button></form><div id="wres" style="margin-top:14px"></div></div>`;
+    const check = async (c) => {
+      try {
+        const w = await api(`/warranty/${encodeURIComponent(c.trim())}`);
+        $('#wres').innerHTML = `<div class="card cert"><div class="cert-hd">${I.shield}<b>${T('certTitle')}</b></div><div class="cert-code num">${esc(w.code)}</div>
+          <div class="cert-dev">${esc(`${w.brand} ${w.model}`)} · ${esc(L(w.service, 'name'))} · ${T(`q_${w.quality}`)}</div>
+          <div class="cert-valid ${w.valid ? 'ok' : 'no'}">${w.valid ? esc(T('validUntil', { x: w.warranty_until })) : T('expired')}</div></div>`;
+      } catch { $('#wres').innerHTML = `<div class="err">${T('warrantyNotFound')}</div>`; }
+    };
+    $('#wf').onsubmit = (e) => { e.preventDefault(); check(e.target.code.value); };
+    if (code) check(code);
   }
 
   // ================= trade-in wizard =================
@@ -1232,7 +1433,7 @@
     app.onclick = null;
     S.waContext = '';
     // No floating button where the customer is finishing a purchase — it would cover the main button.
-    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset', 'tradein', 'finder'].includes(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]);
+    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset', 'tradein', 'finder', 'repair'].includes(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]);
     renderWhatsApp();
     closePanels();
     const [pathPart, query] = location.hash.replace(/^#/, '').split('?');
@@ -1265,6 +1466,9 @@
       case 'faq': return viewFaq();
       case 'tradein': return viewTradein(qs.get('from') === 'cart');
       case 'finder': return viewFinder();
+      case 'repair': return viewRepair(qs.get('resume') === '1');
+      case 'repairs': return viewRepairs(p1);
+      case 'warranty': return viewWarranty(p1);
       default: return viewHome();
     }
   }
