@@ -590,3 +590,23 @@ table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
 #qr svg { width: 140px; height: 140px; margin: 0 auto; display: block; }
 .cert-url { color: var(--muted); font-size: 11.5px; word-break: break-all; margin: 6px 0; }
 @media print { .header, .footer, .page-head, .summary, .approval, .r-timeline, .wa-float, #printCert, .toast { display: none !important; } .cert { border: 2px solid #000; } }
+
+/* finder: custom budget */
+.budget-custom { display: flex; gap: 8px; margin-top: 12px; }
+.budget-custom .input { flex: 1; height: 54px; }
+.budget-custom .btn { padding: 0 22px; }
+/* home: repair section */
+.promo-tiles { grid-template-columns: 1fr 1fr; }
+.repair-home { background: linear-gradient(160deg, #1A1D2E, #2A2F45); border-radius: 22px; padding: 16px; margin: -6px 0 22px; color: #fff; box-shadow: var(--shadow); }
+.rh-main { display: flex; align-items: center; gap: 12px; color: #fff; }
+.rh-main .rh-ic { width: 50px; height: 50px; border-radius: 16px; background: var(--grad); display: grid; place-items: center; flex: 0 0 auto; }
+.rh-main .rh-ic svg { width: 26px; height: 26px; }
+.rh-txt { flex: 1; display: flex; flex-direction: column; }
+.rh-txt b { font-size: 18px; }
+.rh-txt small { opacity: .8; font-size: 13px; line-height: 1.5; }
+.rh-go svg { width: 20px; height: 20px; opacity: .7; }
+[dir=ltr] .rh-go svg { transform: scaleX(-1); }
+.rh-svcs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 14px 0; }
+.rh-svcs a { background: rgba(255,255,255,.08); border-radius: 14px; padding: 10px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #fff; font-size: 12.5px; font-weight: 700; }
+.rh-svcs a span { font-size: 22px; }
+.rh-cta { padding: 13px; }

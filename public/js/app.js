@@ -173,6 +173,7 @@
       <a href="#/" data-nav="home">${T('home')}</a>
       <a href="#" data-open-cats>${T('categories')}</a>
       <a href="#/orders" data-nav="orders">${T('myOrders')}</a>
+      <a href="#/repair" data-nav="repair">${T('repairTitle')}</a>
       <a href="#/profile" data-nav="profile">${T('profile')}</a>`;
     renderMenu();
   }
@@ -363,8 +364,12 @@
         <div class="promo-tiles">
           <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b><small>${T('finderSub')}</small></a>
           ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b><small>${T('tiCheck')}</small></a>` : ''}
-          ${S.settings.repair_enabled === '1' ? `<a class="promo-tile repair" href="#/repair"><span class="pi">${I.wrench}</span><b>${T('repairTitle')}</b><small>${T('repairSub')}</small></a>` : ''}
         </div>
+        ${S.settings.repair_enabled === '1' ? `<div class="repair-home">
+          <a class="rh-main" href="#/repair"><span class="rh-ic">${I.wrench}</span><span class="rh-txt"><b>${T('repairTitle')}</b><small>${T('repairHomeSub')}</small></span><span class="rh-go">${I.chev}</span></a>
+          <div class="rh-svcs">${[['screen', '📱'], ['battery', '🔋'], ['charging', '🔌'], ['back', '🪟'], ['water', '💧']].map(([k, ic]) => `<a href="#/repair?start=1"><span>${ic}</span>${T(`rh_${k}`)}</a>`).join('')}</div>
+          <a class="btn btn-primary btn-block rh-cta" href="#/repair?start=1">${I.wrench}${T('repairHomeCta')}</a>
+        </div>` : ''}
         <div id="flash"></div>
         <div class="sort-tabs" id="sortTabs"></div>
         <div id="grid">${gridSkeleton()}</div>
@@ -1091,7 +1096,7 @@
 
   // ================= repair =================
   const SVC_ICON = { screen: '📱', battery: '🔋', charging: '🔌', back: '🪟', camera: '📷', audio: '🔊', water: '💧', software: '⚙️', other: '🛠️' };
-  async function viewRepair(resume) {
+  async function viewRepair(resume, start) {
     app.innerHTML = '<div class="spinner"></div>';
     const cat = await api('/repair/catalog').catch(() => ({ enabled: false }));
     if (!cat.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_repair_disabled')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
@@ -1206,7 +1211,7 @@
         } catch (e) { btn.disabled = false; toast(errMsg(e)); if (e.code === 'repair_slot') s4(); }
       };
     };
-    if (resume && st.quote && st.quality) s5(); else intro();
+    if (resume && st.quote && st.quality) s5(); else if (start) s1(); else intro();
   }
 
   async function viewRepairs(code) {
@@ -1354,13 +1359,15 @@
   // ================= phone finder =================
   async function viewFinder() {
     const st = { budget: null, os: null, uses: [], storage: 0 };
-    const B = [[0, 300000], [300000, 600000], [600000, 1000000], [1000000, 1500000], [1500000, 0], [0, 0]];
+    const B = [[0, 150000], [150000, 300000], [300000, 600000], [600000, 1000000], [1000000, 1500000], [1500000, 0], [0, 0]];
     const bLabel = ([min, max]) => (!min && !max ? T('fAny') : !min ? T('upTo', { x: fmt(max) }) : !max ? T('over', { x: fmt(min) }) : `${fmt(min)} – ${fmt(max)}`);
     const shell = (title, body, stepNo) => `${pageHead(T('finderTitle'))}<div class="container wizard">
       <div class="wz-progress"><i style="width:${stepNo * 25}%"></i></div><div class="wz-step">${esc(T('step', { x: stepNo, y: 4 }))}</div><h2 class="wz-q">${title}</h2>${body}</div>`;
     const s1 = () => {
-      app.innerHTML = shell(T('fBudget'), `<p class="wz-sub">${T('finderSub')}</p><div class="wz-options list">${B.map((b, i) => `<button class="wz-opt" data-i="${i}">${esc(bLabel(b))} ${b[0] || b[1] ? `<small>${T('currency')}</small>` : ''}</button>`).join('')}</div>`, 1);
+      app.innerHTML = shell(T('fBudget'), `<p class="wz-sub">${T('finderSub')}</p><div class="wz-options list">${B.map((b, i) => `<button class="wz-opt" data-i="${i}">${esc(bLabel(b))} ${b[0] || b[1] ? `<small>${T('currency')}</small>` : ''}</button>`).join('')}</div>
+        <form class="budget-custom" id="bc"><input class="input num" type="number" min="10000" step="5000" inputmode="numeric" name="max" placeholder="${esc(T('budgetCustom'))}"><button class="btn btn-primary">${T('next')}</button></form>`, 1);
       app.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => { st.budget = B[Number(b.dataset.i)]; s2(); });
+      $('#bc').onsubmit = (e) => { e.preventDefault(); const v = Number(e.target.max.value); if (v > 0) { st.budget = [0, v]; s2(); } };
     };
     const s2 = () => {
       app.innerHTML = shell(T('fOs'), `<div class="wz-options">${[['ios', T('iphone')], ['android', T('android')], ['', T('fAny')]].map(([k, l]) => `<button class="wz-opt" data-v="${k}">${l}</button>`).join('')}</div><button class="btn btn-soft wz-back">${T('back')}</button>`, 2);
@@ -1466,7 +1473,7 @@
       case 'faq': return viewFaq();
       case 'tradein': return viewTradein(qs.get('from') === 'cart');
       case 'finder': return viewFinder();
-      case 'repair': return viewRepair(qs.get('resume') === '1');
+      case 'repair': return viewRepair(qs.get('resume') === '1', qs.get('start') === '1');
       case 'repairs': return viewRepairs(p1);
       case 'warranty': return viewWarranty(p1);
       default: return viewHome();

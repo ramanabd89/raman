@@ -91,6 +91,7 @@ window.I18N = {
     privacyTitle: 'پاراستنی زانیارییەکانت', privacyText: '• پێش ئەوەی مۆبایلەکە بدەیت، باکئەپ بکە (iCloud / Google).\n• سامسۆنگ: ڕێکخستن ← چاودێری باتری و ئامێر ← Maintenance mode، بەم شێوەیە ناتوانین وێنە و نامەکانت ببینین.\n• ئایفۆن: پێویست ناکات کۆدەکەت بە تەکنیسیەن بدەیت، لەبەردەمت تاقی دەکەینەوە.\n• بەڵێنی نووسراو: تەنها ئەو بەشە دەکەینەوە کە چاک دەکرێت.',
     howTitle: 'چۆن کار دەکات؟', how1: 'نرخ ببینە و کات هەڵبژێرە', how2: 'پشکنینی بەخۆڕایی و ڕەزامەندیت', how3: 'چاککردنەوە + وێنە + پارچە کۆنەکە', how4: 'گەرەنتی نووسراو',
     err_repair_slot: 'ئەم کاتە پڕ بوو، کاتێکی تر هەڵبژێرە', err_repair_disabled: 'بەشی چاککردنەوە لە ئێستادا داخراوە', err_repair_no_request: 'هیچ داواکارییەک نییە',
+    budgetCustom: 'یان بودجەکەت بنووسە (دینار)', repairHomeSub: 'شاشە، باتری، شەحن و زیاتر — نرخی ڕوون و گەرەنتی نووسراو', repairHomeCta: 'نرخ ببینە و کات دیاری بکە', rh_screen: 'شاشە', rh_battery: 'باتری', rh_charging: 'شەحن', rh_back: 'پشتەوە', rh_water: 'ئاو',
     shareMsg: 'لە {s} داوای مۆبایل و ئەکسسوار بکە! کۆدی داوەتی من: {c}', bestQuality: 'باشترین کوالێتی و مۆدێل',
   },
   ar: {
@@ -184,6 +185,7 @@ window.I18N = {
     privacyTitle: 'حماية بياناتك', privacyText: '• قبل ما تسلّم الموبايل سوّي نسخة احتياطية (iCloud / Google).\n• سامسونج: الإعدادات ← العناية بالبطارية والجهاز ← وضع الصيانة (Maintenance mode)، وبهيچ ما نگدر نشوف صورك ورسائلك.\n• آيفون: ما تحتاج تعطي الرمز للفني، نختبره قدامك.\n• تعهّد مكتوب: ما نفتح غير القطعة اللي نصلحها.',
     howTitle: 'شلون تشتغل؟', how1: 'شوف السعر واختار موعد', how2: 'فحص مجاني وموافقتك', how3: 'تصليح + صور + القطعة القديمة', how4: 'ضمان مكتوب',
     err_repair_slot: 'هذا الموعد انحجز، اختر وقت ثاني', err_repair_disabled: 'قسم التصليح متوقف حالياً', err_repair_no_request: 'ماكو طلب',
+    budgetCustom: 'أو اكتب ميزانيتك (دينار)', repairHomeSub: 'شاشة، بطارية، شحن وأكثر — سعر واضح وضمان مكتوب', repairHomeCta: 'شوف السعر واحجز موعد', rh_screen: 'شاشة', rh_battery: 'بطارية', rh_charging: 'شحن', rh_back: 'ظهر', rh_water: 'ماي',
     shareMsg: 'اطلب موبايلات وإكسسوارات من {s}! كود الدعوة: {c}', bestQuality: 'أفضل جودة وأحدث موديلات',
   },
   en: {
@@ -277,6 +279,7 @@ window.I18N = {
     privacyTitle: 'Protect your data', privacyText: '• Back up before handing over the phone (iCloud / Google).\n• Samsung: Settings → Battery and device care → Maintenance mode, so we cannot see your photos or messages.\n• iPhone: you do not need to give the passcode to the technician; we test it in front of you.\n• Written promise: we only open the part we repair.',
     howTitle: 'How it works', how1: 'See the price, pick a time', how2: 'Free check and your approval', how3: 'Repair + photos + old part', how4: 'Written warranty',
     err_repair_slot: 'That time was just taken, pick another', err_repair_disabled: 'Repairs are paused right now', err_repair_no_request: 'No request',
+    budgetCustom: 'Or type your budget (IQD)', repairHomeSub: 'Screen, battery, charging & more — clear prices, written warranty', repairHomeCta: 'See prices & book', rh_screen: 'Screen', rh_battery: 'Battery', rh_charging: 'Charging', rh_back: 'Back glass', rh_water: 'Water',
     shareMsg: 'Order phones & accessories from {s}! My invite code: {c}', bestQuality: 'Best quality & latest models',
   },
 };
