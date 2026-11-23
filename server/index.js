@@ -50,7 +50,7 @@ const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancel
 const ORDER_SOURCES = ['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
   'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text',
-  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled', 'repair_enabled'];
+  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled', 'repair_enabled', 'proof_enabled'];
 const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_round', 'min_profit',
   'repair_pickup', 'repair_pickup_fee', 'repair_free_diagnosis', 'repair_honest_pct', 'repair_open', 'repair_close', 'repair_closed_days', 'repair_slot_capacity'];
 // Secret admin address, e.g. ADMIN_PATH=/the-gate (default /admin).
@@ -363,19 +363,50 @@ app.get('/api/products/:id', wrap((req, res) => {
 }));
 
 // "Frequently bought together": products the admin picked, else what other customers bought with it, else popular accessories.
+// ---- accessory compatibility ("frequently bought together" must fit the phone) ----
+// Model signature from a name: family (iphone/galaxy/redmi/...), model number and modifiers (pro, max, plus, ultra, mini...).
+const FAMILIES = ['iphone', 'galaxy', 'redmi', 'poco', 'pixel', 'honor', 'infinix', 'tecno', 'huawei'];
+const MODIFIERS = ['pro', 'max', 'plus', 'ultra', 'mini', 'lite', 'fe', 'edge'];
+function modelSig(text) {
+  const t = ` ${normalize(text)} `.replace(/ برو /g, ' pro ').replace(/ ماكس /g, ' max ').replace(/ ايفون /g, ' iphone ').replace(/ (جالكسي|كالاكسي|كالكسي) /g, ' galaxy ')
+    .split(' ').filter(Boolean);
+  const fi = t.findIndex((w) => FAMILIES.includes(w));
+  if (fi < 0) return null;
+  const rest = t.slice(fi + 1, fi + 6);
+  const ni = rest.findIndex((w) => /^\d{1,3}$/.test(w));
+  const series = ni > 0 && /^[a-z]$/.test(rest[ni - 1]) ? rest[ni - 1] : ''; // galaxy "s 24" / "a 55"
+  const num = ni >= 0 ? rest[ni] : '';
+  const mods = rest.slice(ni >= 0 ? ni + 1 : 0).filter((w) => MODIFIERS.includes(w)).sort().join('+');
+  return { family: t[fi], model: `${series}${num}`, mods };
+}
+const allNames = (x) => [x.name_en, x.name_ar, x.name_ku].filter(Boolean).join(' ');
+function compatibleWith(phone, acc) {
+  const ps = modelSig(allNames(phone));
+  if (!ps) return true;
+  const as = modelSig(allNames(acc));
+  // accessory made for a specific phone → must be exactly this phone (family, number and Pro/Max/Ultra…)
+  if (as && (as.family !== ps.family || (as.model && as.model !== ps.model) || as.mods !== ps.mods)) return false;
+  // Lightning only fits iPhone 14 and older
+  if (/lightning|لايتنينغ|لايتننغ/i.test(allNames(acc)) && !(ps.family === 'iphone' && Number(ps.model) > 0 && Number(ps.model) <= 14)) return false;
+  return true;
+}
+
 function boughtTogether(p) {
+  const isPhone = parseJson(p.attrs || '{}', {}).os;
+  const fits = (x) => !isPhone || compatibleWith(p, x);
   const pick = (ids) => ids.length ? db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.stock > 0 AND p.id IN (${ids.map(() => '?').join(',')})`).all(...ids) : [];
   let list = pick(parseJson(p.bundle_ids || '[]', []).map((x) => int(x)).filter(Boolean).slice(0, 4));
   if (list.length < 3) {
     const co = db.prepare(`SELECT oi2.product_id id, COUNT(*) n FROM order_items oi1 JOIN order_items oi2 ON oi2.order_id = oi1.order_id AND oi2.product_id != oi1.product_id
       WHERE oi1.product_id = ? GROUP BY oi2.product_id ORDER BY n DESC LIMIT 6`).all(p.id).map((r) => r.id);
-    list = [...list, ...pick(co).filter((x) => !list.some((y) => y.id === x.id))];
+    list = [...list, ...pick(co).filter((x) => fits(x) && !list.some((y) => y.id === x.id))];
   }
   if (list.length < 3) {
     const more = db.prepare(`SELECT p.*, ${VARIANT_COUNT_SQL} FROM products p WHERE p.active = 1 AND p.stock > 0 AND p.id != ? AND p.price < ?
       AND (p.category_id IS NULL OR p.category_id NOT IN (SELECT id FROM categories WHERE id = ? OR parent_id = (SELECT parent_id FROM categories WHERE id = ?)))
-      ORDER BY p.sold DESC LIMIT 6`).all(p.id, Math.max(p.price * 0.5, 50000), p.category_id || 0, p.category_id || 0);
-    list = [...list, ...more.filter((x) => !list.some((y) => y.id === x.id))];
+      ORDER BY p.sold DESC LIMIT 30`).all(p.id, Math.max(p.price * 0.5, 50000), p.category_id || 0, p.category_id || 0);
+    // phones: only accessories that fit (no iPhone case on a Galaxy, no Lightning cable on a USB-C iPhone), and no other phones
+    list = [...list, ...more.filter((x) => fits(x) && !(isPhone && parseJson(x.attrs || '{}', {}).os) && !list.some((y) => y.id === x.id))];
   }
   return list.filter((x) => x.id !== p.id).slice(0, 4).map((x) => productOut(x));
 }

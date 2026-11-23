@@ -48,6 +48,7 @@
     swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>',
     spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 2 9.4 7.4 4 9l5.4 1.6L11 16l1.6-5.4L18 9l-5.4-1.6L11 2Zm7 11-.9 2.6-2.6.9 2.6.9.9 2.6.9-2.6 2.6-.9-2.6-.9L18 13Z"/></svg>',
     wrench: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.7 6.3a1 1 0 0 0-1.6-.3l-2.6 2.6-2-.4-.4-2 2.6-2.6a1 1 0 0 0-.3-1.6 6 6 0 0 0-7.9 7.6l-6.7 6.7a2.5 2.5 0 0 0 3.5 3.5l6.7-6.7a6 6 0 0 0 7.6-7.9Z"/></svg>',
+    user: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 12c4.4 0 8 2.2 8 5v1a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1c0-2.8 3.6-5 8-5Z"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>',
   };
 
@@ -86,6 +87,7 @@
     return s;
   };
   const L = (obj, field) => obj[`${field}_${S.lang}`] || obj[`${field}_ku`] || obj[`${field}_en`] || '';
+  const bidiName = (text) => esc(text).replace(/([A-Za-z0-9][A-Za-z0-9.+\-/]*(?: [A-Za-z0-9][A-Za-z0-9.+\-/]*)*)/g, '<bdi dir="ltr">$1</bdi>');
   const fmt = (n) => Number(n || 0).toLocaleString('en-US');
   const money = (n) => `<span class="price"><span class="num">${fmt(n)}</span><small>${T('currency')}</small></span>`;
   const safeUrl = (u) => (/^(https?:\/\/|\/|#)/i.test(String(u || '')) ? String(u) : '');
@@ -125,6 +127,7 @@
   let syncTimer;
   function saveCart() {
     store.set('cart', S.cart); updateCartBadge();
+    if ($('#tabbar') && $('#tabbar').innerHTML) renderTabbar(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0] || undefined);
     if (S.token) { clearTimeout(syncTimer); syncTimer = setTimeout(() => api('/cart/sync', { method: 'POST', body: { items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } }).catch(() => {}), 1500); }
   }
   function updateCartBadge() {
@@ -142,7 +145,7 @@
     if (cur + qty > stock) { toast(T('maxStock', { x: stock })); return; }
     if (ex) ex.qty += qty;
     else S.cart.push({ id: p.id, variant_id: variant ? variant.id : null, variant_label: variant ? variant.label : null, qty,
-      name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en, price: variant ? variant.price : p.price, image: p.image, stock });
+      name_ku: p.name_ku, name_ar: p.name_ar, name_en: p.name_en, price: variant ? variant.price : p.price, image: p.image, stock, is_phone: !!(p.attrs && p.attrs.os) });
     saveCart();
     if (S.bundle && S.bundle.forId === p.id && S.bundle.items.length) showBundleSheet(S.bundle.items);
     else toast(T('added'));
@@ -321,25 +324,26 @@
     productCache.set(p.id, p);
     const out = p.stock <= 0;
     const off = p.old_price && p.old_price > p.price ? Math.round((1 - p.price / p.old_price) * 100) : 0;
-    // At most one badge per corner, so the photo stays clean.
-    const endTags = out ? [`<span class="tag out">${T('soldOut')}</span>`] : off ? [`<span class="tag off">-${off}%</span>`] : [];
-    const startTag = out ? null
+    // One badge at most (Baymard: badges only for meaningful differences); the discount sits next to the price.
+    const badge = out ? `<span class="tag out">${T('soldOut')}</span>`
       : p.stock <= 3 ? `<span class="tag low">${T('lowStock')}</span>`
-        : p.featured ? `<span class="tag feat">${I.star}${T('featured')}</span>`
-          : p.trending ? `<span class="tag trend">${I.fire}${T('trending')}</span>`
-            : p.sold >= 20 ? `<span class="tag sold">+${p.sold} ${I.fire}</span>` : null;
-    const startTags = startTag ? [startTag] : [];
+        : p.sold >= 20 ? `<span class="tag sold">${I.fire}${esc(T('soldN', { x: fmt(p.sold) }))}</span>`
+          : p.trending ? `<span class="tag trend">${I.fire}${T('trending')}</span>` : '';
+    const a = p.attrs || {};
+    const spec = a.os ? [a.storage ? `${a.storage >= 1024 ? `${a.storage / 1024}TB` : `${a.storage}GB`}` : '', a.ram ? `${a.ram}GB RAM` : '', a.camera ? `${a.camera}MP` : ''].filter(Boolean).join(' · ') : '';
     return `
       <a class="p-card ${out ? 'soldout' : ''}" href="#/product/${p.id}">
         <div class="img">
-          <div class="tags-stack start">${startTags.join('')}</div>
-          <div class="tags-stack end">${endTags.join('')}</div>
-          <img src="${img(p.image)}" alt="${esc(L(p, 'name'))}" loading="lazy">
+          ${badge ? `<div class="tags-stack start">${badge}</div>` : ''}
+          <img src="${img(p.image)}" alt="${esc(L(p, 'name'))}" loading="lazy" decoding="async">
         </div>
         <div class="body">
-          <div class="nm">${esc(L(p, 'name'))}</div>
+          ${p.brand ? `<div class="c-brand">${esc(p.brand)}</div>` : ''}
+          <div class="nm">${bidiName(L(p, 'name'))}</div>
+          ${spec ? `<div class="c-spec num">${esc(spec)}</div>` : ''}
           <div class="foot">
-            <div class="prices">${p.has_variants ? `<small style="color:var(--ink-2);font-weight:600">${T('from')}</small>` : ''}${money(p.price)}${off ? `<span class="old-price num">${fmt(p.old_price)}</span>` : ''}</div>
+            <div class="prices">${p.has_variants ? `<small class="c-from">${T('from')}</small>` : ''}${money(p.price)}
+              ${off ? `<div class="c-old"><span class="old-price num">${fmt(p.old_price)}</span><span class="off-pill num">-${off}%</span></div>` : ''}</div>
             <button class="add-btn" data-add="${p.id}" ${out ? 'disabled' : ''} aria-label="${esc(T('addToCart'))}">${I.plus}</button>
           </div>
         </div>
@@ -360,12 +364,9 @@
       </div></div></div>
       <div class="container">
         <div id="slider"></div>
+        <p class="hero-value">${T('heroValue')}</p>
         ${trustStrip()}
-        <div class="promo-tiles">
-          <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b><small>${T('finderSub')}</small></a>
-          ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b><small>${T('tiCheck')}</small></a>` : ''}
-        </div>
-        ${S.settings.repair_enabled === '1' ? `<section class="repair-ad" id="repairAd" aria-label="${esc(T('repairTitle'))}">
+        ${S.settings.repair_enabled === '1' ? `<section class="repair-ad compact" id="repairAd" aria-label="${esc(T('repairTitle'))}">
           <svg class="ra-art" viewBox="0 0 120 200" aria-hidden="true"><rect x="10" y="6" width="100" height="188" rx="18" fill="#0F1220" stroke="#3A4060" stroke-width="3"/>
             <rect x="18" y="16" width="84" height="168" rx="12" fill="url(#raG)"/><defs><linearGradient id="raG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2B3150"/><stop offset="1" stop-color="#151A2E"/></linearGradient></defs>
             <path class="ra-crack" d="M70 40 L58 72 L74 88 L52 118 L66 132 L48 170 M58 72 L36 80 M74 88 L96 96 M52 118 L30 128" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".75"/>
@@ -374,12 +375,15 @@
             <span class="ra-tag">${I.wrench}${T('repairTitle')}</span>
             <div class="ra-hooks" aria-live="polite">${[1, 2, 3, 4, 5].map((n, i) => `<div class="ra-hook ${i === 0 ? 'on' : ''}" data-hook="${n}"><b>${T(`hk${n}q`)}</b><span>${T(`hk${n}a`)}</span></div>`).join('')}</div>
             <div class="ra-dots">${[0, 1, 2, 3, 4].map((i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
-            <div class="ra-chips"><span>${I.shield}${T('chipWarranty')}</span><span>${I.swap}${T('chipOld')}</span><span id="raFree">${I.check}${T('chipPrice')}</span><span id="raPick" hidden>${I.truck}${T('chipPickup')}</span></div>
-            <div class="ra-from" id="raFrom"></div>
-            <a class="btn btn-primary ra-cta" href="#/repair?start=1">${I.wrench}${T('repairHomeCta')}</a>
-            <div class="rh-svcs">${[['screen', '📱'], ['battery', '🔋'], ['charging', '🔌'], ['back', '🪟'], ['water', '💧']].map(([k, ic]) => `<a href="#/repair?start=1"><span>${ic}</span>${T(`rh_${k}`)}</a>`).join('')}</div>
+            <div class="ra-row"><div class="ra-from" id="raFrom"></div><a class="btn btn-primary ra-cta" href="#/repair?start=1">${T('repairHomeCta')}</a></div>
+            <div class="ra-chips"><span>${I.shield}${T('chipWarranty')}</span><span>${I.swap}${T('chipOld')}</span><span id="raFree" hidden>${I.check}${T('chipPrice')}</span><span id="raPick" hidden>${I.truck}${T('chipPickup')}</span></div>
           </div>
         </section>` : ''}
+        <div class="promo-tiles">
+          <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b></a>
+          ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b></a>` : ''}
+        </div>
+
         <div id="flash"></div>
         <div class="sort-tabs" id="sortTabs"></div>
         <div id="grid">${gridSkeleton()}</div>
@@ -400,7 +404,7 @@
     const cat = await api('/repair/catalog').catch(() => null);
     if (!document.body.contains(ad)) return;
     if (cat && cat.from_price) $('#raFrom').innerHTML = `${esc(T('fromPrice', { x: '' }))} ${money(cat.from_price)}`;
-    if (cat && cat.free_diagnosis) $('#raFree').innerHTML = `${I.check}${T('chipFree')}`;
+    if (cat && cat.free_diagnosis) { $('#raFree').innerHTML = `${I.check}${T('chipFree')}`; $('#raFree').hidden = false; }
     else ad.querySelector('[data-hook="3"] span').textContent = T('hk3b');
     // pickup hook: "we collect it from your home" (free when the fee is 0); removed when pickup is off
     const h5 = ad.querySelector('[data-hook="5"]');
@@ -528,23 +532,29 @@
       <div class="container">
         <div class="pd">
           <div class="pd-gallery">
-            <div class="main"><span class="tag off end hidden" id="offTag"></span><img id="mainImg" src="${img(gallery[0])}" alt="${esc(L(p, 'name'))}"></div>
+            <div class="main"><span class="tag off end hidden" id="offTag"></span>
+              <div class="swipe" id="swipe">${gallery.map((g, i) => `<img src="${img(g)}" alt="${esc(L(p, 'name'))}" ${i ? 'loading="lazy"' : ''} decoding="async">`).join('')}</div>
+              ${gallery.length > 1 ? `<div class="swipe-dots">${gallery.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}</div>
             ${gallery.length > 1 ? `<div class="thumbs">${gallery.map((g, i) => `<button class="${i === 0 ? 'active' : ''}" data-img="${img(g)}"><img src="${img(g)}" alt=""></button>`).join('')}</div>` : ''}
           </div>
           <div class="card pd-info">
             ${p.brand ? `<div class="brand">${esc(p.brand)}</div>` : ''}
             ${(p.tags || []).length ? `<div class="ptags">${p.tags.map((t) => `<span class="ptag" style="background:${esc(t.color)}1f;color:${esc(t.color)}">${esc(L(t, 'name'))}</span>`).join('')}</div>` : ''}
-            <h1>${esc(L(p, 'name'))}</h1>
+            <h1>${bidiName(L(p, 'name'))}</h1>
             <div class="prices" id="pdPrice"></div>
             <div class="usd-approx" id="pdUsd"></div>
+            <div class="deliv-line">${I.truck}<span>${T('deliveryLine')}${Number(S.settings.free_delivery_over) ? ` · ${esc(T('freeOverLine', { x: `${fmt(S.settings.free_delivery_over)} ${T('currency')}` }))}` : ''}</span></div>
             ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${variants.map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}</button>`).join('')}</div>` : ''}
             <div class="stock" id="pdStock"></div>
+            ${p.attrs && p.attrs.os && S.settings.proof_enabled === '1' ? `<div class="proof"><b>${I.shield}${T('proofTitle')}</b><ul>
+              <li>${T('proof1')}</li><li>${T('proof2')}</li><li>${T('proof3')}</li>${S.settings.warranty_text ? `<li>${esc(S.settings.warranty_text)}</li>` : ''}</ul></div>` : ''}
             <div class="pd-actions">
               <div class="qty" id="qtyBox"><button id="qMinus">${I.minus}</button><span id="qVal" class="num">1</span><button id="qPlus">${I.plus}</button></div>
               <button class="btn btn-primary" id="addBtn">${I.basket}${T('addToCart')}</button>
             </div>
+            <a class="btn btn-wa btn-block hidden" id="askStock" target="_blank" rel="noopener">${I.whatsapp}${T('askStock')}</a>
             ${p.attrs && p.attrs.os && S.settings.tradein_enabled === '1' ? `<a class="ti-hint" href="#/tradein">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}
-            <button class="btn btn-soft btn-block" id="shareBtn" style="margin-bottom:6px">${I.share}${T('share')}</button>
+            <button class="share-mini" id="shareBtn" aria-label="${esc(T('share'))}">${I.share}${T('share')}</button>
             ${trustStrip()}
             <div class="cashback-note hidden" id="pdCashback"></div>
             ${(p.specs || []).length ? `<div class="pd-desc"><h3>${T('specs')}</h3><table class="specs">${p.specs.map((x) => `<tr><th>${esc(x.k)}</th><td dir="auto">${esc(x.v)}</td></tr>`).join('')}</table></div>` : ''}
@@ -575,15 +585,29 @@
       st.className = `stock ${out ? 'out' : stock <= 3 ? 'low' : 'in'}`;
       st.textContent = out ? T('soldOut') : stock <= 3 ? T('maxStock', { x: stock }) : T('inStock');
       $('#addBtn').disabled = out;
+      const waNum = String(S.settings.whatsapp || '').replace(/\D/g, '');
+      const ask = $('#askStock'); ask.classList.toggle('hidden', !out || !waNum);
+      if (out && waNum) ask.href = `https://wa.me/${waNum}?text=${encodeURIComponent(T('waProductMsg', { x: S.waContext }))}`;
+      // sticky buy bar (mobile): price + add + WhatsApp, always within thumb reach
+      $('#buybar').innerHTML = `<div class="bb-price">${money(price)}${off ? `<span class="off-pill num">-${off}%</span>` : ''}</div>
+        ${waNum ? `<a class="bb-wa" target="_blank" rel="noopener" href="https://wa.me/${waNum}?text=${encodeURIComponent(T('waProductMsg', { x: S.waContext }))}" aria-label="WhatsApp">${I.whatsapp}</a>` : ''}
+        <button class="btn btn-primary bb-add" ${out ? 'disabled' : ''}>${I.basket}${out ? T('soldOut') : T('addToCart')}</button>`;
+      $('#buybar .bb-add').onclick = () => addToCart(p, qty, variant);
       $('#qtyBox').classList.toggle('hidden', out);
       qty = Math.max(1, Math.min(qty, stock || 1)); $('#qVal').textContent = qty;
       app.querySelectorAll('[data-variant]').forEach((b) => b.classList.toggle('active', variant && Number(b.dataset.variant) === variant.id));
     };
     render();
     app.querySelectorAll('[data-variant]').forEach((b) => b.addEventListener('click', () => { variant = variants.find((v) => v.id === Number(b.dataset.variant)); qty = 1; render(); }));
-    app.querySelectorAll('[data-img]').forEach((b) => b.addEventListener('click', () => {
-      $('#mainImg').src = b.dataset.img;
-      app.querySelectorAll('[data-img]').forEach((x) => x.classList.toggle('active', x === b));
+    const sw = $('#swipe');
+    const dots = app.querySelectorAll('.swipe-dots i');
+    sw.addEventListener('scroll', () => {
+      const i = Math.round(Math.abs(sw.scrollLeft) / sw.clientWidth);
+      dots.forEach((d, n) => d.classList.toggle('on', n === i));
+      app.querySelectorAll('[data-img]').forEach((x, n) => x.classList.toggle('active', n === i));
+    }, { passive: true });
+    app.querySelectorAll('[data-img]').forEach((b, n) => b.addEventListener('click', () => {
+      sw.scrollTo({ left: (document.documentElement.dir === 'rtl' ? -1 : 1) * n * sw.clientWidth, behavior: 'smooth' });
     }));
     $('#qMinus').onclick = () => { qty = Math.max(1, qty - 1); $('#qVal').textContent = qty; };
     $('#qPlus').onclick = () => { qty = Math.min(variant ? variant.stock : p.stock, qty + 1); $('#qVal').textContent = qty; };
@@ -647,14 +671,15 @@
               <div class="qty"><button data-dec="${esc(cartKey(i))}">${I.minus}</button><span class="num">${i.qty}</span><button data-inc="${esc(cartKey(i))}">${I.plus}</button></div>
             </div>
           </div>`).join('')}</div>
-        <div class="card summary">
+        <div class="card summary cart-summary">
           ${freeOver && sub < freeOver ? `<div class="hint">${esc(T('freeDeliveryHint', { x: `${fmt(freeOver - sub)} ${T('currency')}` }))}<div class="progress"><i style="width:${Math.min(100, (sub / freeOver) * 100)}%"></i></div></div>` : ''}
           ${tradeinBox(sub)}
           <div class="sum-row"><span>${T('subtotal')}</span>${money(sub)}</div>
           ${S.tradein ? `<div class="sum-row"><span>${T('tiCredit')}</span><b class="num" style="color:var(--green)">-${fmt(Math.min(S.tradein.estimate, sub))}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${isFree || !minFee ? `<b style="color:var(--green)">${T('free')}</b>` : `<span>${fees.length > 1 && new Set(fees).size > 1 ? `<small style="color:var(--ink-2)">${T('from')}</small> ` : ''}${money(minFee)}</span>`}</div>
           <div class="sum-row total"><span>${T('total')}</span>${money(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))}</div>
-          <a class="btn btn-primary btn-block" href="#/checkout" style="margin-top:12px">${T('checkout')}</a>
+          <a class="btn btn-primary btn-block checkout-btn" href="#/checkout">${esc(T('checkoutWith', { x: `${fmt(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))} ${T('currency')}` }))}</a>
+          <p class="checkout-trust">${I.shield}<span>${esc(T('checkoutTrust', { x: S.settings.exchange_days || 3 }))}</span></p>
         </div>
       </div>`;
     app.onclick = (e) => {
@@ -671,6 +696,7 @@
 
   function tradeinBox(sub) {
     if (S.settings.tradein_enabled !== '1') return '';
+    if (!S.tradein && !S.cart.some((i) => i.is_phone)) return '';
     if (!S.tradein) return `<a class="ti-banner" href="#/tradein?from=cart">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>`;
     return `<div class="ti-applied">${I.swap}<div><b>${esc(S.tradein.label)}</b><small>${T('tiNote')}</small></div><button data-ti-remove aria-label="${esc(T('delete'))}">${I.close}</button></div>`;
   }
@@ -1474,6 +1500,15 @@
     try { fetch('/api/track', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: `Bearer ${S.token}` } : {}) }, body: JSON.stringify({ path, product_id: productId || undefined, src: campaignSource() || undefined }), keepalive: true }); } catch { /* ignore */ }
   }
 
+  // ---------------- bottom tab bar (mobile, thumb zone) ----------------
+  function renderTabbar(p0) {
+    const n = cartCount();
+    const tabs = [['#/', I.home, T('tabHome'), !p0], ['#', I.list, T('tabCats'), false, 'data-open-cats'],
+      S.settings.repair_enabled === '1' ? ['#/repair', I.wrench, T('tabRepair'), ['repair', 'repairs', 'warranty'].includes(p0)] : ['#/finder', I.spark, T('finderTitle').split(' ')[0], p0 === 'finder'],
+      ['#/cart', I.basket, T('tabCart'), p0 === 'cart', '', n], ['#/profile', I.user, T('tabMe'), ['profile', 'orders', 'order', 'addresses', 'quick', 'login'].includes(p0)]];
+    $('#tabbar').innerHTML = tabs.map(([href, ic, label, on, attr, badge]) => `<a href="${href}" class="${on ? 'on' : ''}" ${attr || ''}>${ic}${badge ? `<b class="num">${badge}</b>` : ''}<span>${esc(label)}</span></a>`).join('');
+  }
+
   // ---------------- router ----------------
   function route() {
     app.onclick = null;
@@ -1489,6 +1524,11 @@
     document.querySelectorAll('#desktopNav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === (parts[0] || 'home')));
     window.scrollTo(0, 0);
     const [p0, p1] = parts;
+    // product page: sticky buy bar instead of the tab bar; checkout/sign-in: neither
+    document.body.classList.toggle('has-buybar', p0 === 'product');
+    document.body.classList.toggle('no-tabbar', ['product', 'checkout', 'quick', 'login', 'register', 'reset'].includes(p0));
+    $('#buybar').classList.toggle('hidden', p0 !== 'product');
+    renderTabbar(p0);
     track(`/${parts.slice(0, p0 === 'product' || p0 === 'category' ? 2 : 1).join('/')}`, p0 === 'product' ? Number(p1) : null);
     const staff = S.user && S.user.role && S.user.role !== 'customer';
     if (S.settings.maintenance_mode === '1' && !staff && !['login', 'quick', 'faq'].includes(p0)) return viewMaintenance();

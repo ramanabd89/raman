@@ -431,6 +431,14 @@ let stop = () => {};
   check('technician can open repairs', (await call('/admin/repairs', { token: TEC })).status === 200);
   check('technician cannot open orders', (await call('/admin/orders', { token: TEC })).status === 403);
 
+  // ---------- bought-together compatibility ----------
+  const bt = async (id) => (await call(`/products/${id}`)).data.bundle.map((x) => x.name_en || x.name_ku);
+  const s24 = await bt(3);
+  check('Galaxy S24 Ultra: no iPhone accessories, no Lightning', !s24.some((n) => /iphone|lightning/i.test(n)), s24);
+  const i16 = await bt(1);
+  check('iPhone 16 Pro Max: no iPhone 16 (non-Pro) case, no Lightning', !i16.some((n) => /lightning/i.test(n) || /^iPhone 16 Silicone/i.test(n)), i16);
+  check('suggestions are never other phones', !(await bt(1)).some((n) => /^(iPhone|Samsung Galaxy|Xiaomi Redmi) .*(GB|Ultra|A55)$/i.test(n)), i16);
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);
