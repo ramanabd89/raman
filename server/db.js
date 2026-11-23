@@ -145,6 +145,72 @@ addColumn('products', 'attrs', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('orders', 'tradein_id', 'INTEGER');
 addColumn('orders', 'tradein_credit', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
+CREATE TABLE IF NOT EXISTS repair_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  name_ku TEXT NOT NULL, name_ar TEXT, name_en TEXT,
+  needs_diagnosis INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS repair_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_id INTEGER NOT NULL REFERENCES repair_services(id) ON DELETE CASCADE,
+  brand TEXT NOT NULL,
+  model TEXT NOT NULL,
+  price_original INTEGER,
+  price_copy INTEGER,
+  duration_min INTEGER NOT NULL DEFAULT 60,
+  warranty_original INTEGER NOT NULL DEFAULT 90,
+  warranty_copy INTEGER NOT NULL DEFAULT 30,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_repair_prices ON repair_prices(brand, model);
+CREATE TABLE IF NOT EXISTS repairs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  brand TEXT NOT NULL,
+  model TEXT NOT NULL,
+  service_id INTEGER,
+  service_label TEXT NOT NULL,
+  quality TEXT NOT NULL,
+  quoted_price INTEGER NOT NULL DEFAULT 0,
+  extra_price INTEGER NOT NULL DEFAULT 0,
+  extra_note TEXT,
+  extra_status TEXT,
+  approved_extra INTEGER NOT NULL DEFAULT 0,
+  pickup_fee INTEGER NOT NULL DEFAULT 0,
+  final_price INTEGER,
+  parts_cost INTEGER,
+  warranty_days INTEGER NOT NULL DEFAULT 0,
+  warranty_until TEXT,
+  method TEXT NOT NULL DEFAULT 'walkin',
+  appointment TEXT,
+  city TEXT,
+  address TEXT,
+  imei TEXT,
+  problem TEXT,
+  technician TEXT,
+  photos TEXT NOT NULL DEFAULT '[]',
+  old_part_returned INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'booked',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_repairs_user ON repairs(user_id);
+CREATE TABLE IF NOT EXISTS repair_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  repair_id INTEGER NOT NULL REFERENCES repairs(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  note TEXT,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+db.exec(`
 CREATE TABLE IF NOT EXISTS tradein_models (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   brand TEXT NOT NULL,
@@ -429,6 +495,8 @@ function bannerSvg(c1, c2, kind) {
 seed();
 for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
   slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',
+  repair_enabled: '1', repair_pickup: '1', repair_pickup_fee: '5000', repair_free_diagnosis: '1', repair_honest_pct: '50',
+  repair_open: '10', repair_close: '21', repair_closed_days: '5', repair_slot_capacity: '2',
   tradein_enabled: '1',
   tradein_rules: JSON.stringify({ screen: { perfect: 0, scratches: 10, cracked: 35 }, body: { perfect: 0, scratches: 8, damaged: 20 }, battery: { good: 0, ok: 8, weak: 15 }, works: { yes: 0, no: 30 }, box: { yes: 0, no: 3 } }),
   variant_presets: JSON.stringify([{ name: 'Storage', values: ['64GB', '128GB', '256GB', '512GB', '1TB'] }, { name: 'Color', values: ['Black', 'White', 'Blue', 'Gold', 'Silver'] }]) })) {
@@ -460,6 +528,38 @@ if (db.prepare('SELECT COUNT(*) n FROM tradein_models').get().n === 0 && db.prep
   };
   for (const [id, a] of Object.entries(attrs)) db.prepare("UPDATE products SET attrs = ? WHERE id = ? AND attrs = '{}'").run(JSON.stringify(a), Number(id));
   setSetting('tradein_seeded', '1');
+}
+if (db.prepare('SELECT COUNT(*) n FROM repair_services').get().n === 0) {
+  const svc = db.prepare('INSERT INTO repair_services(key, name_ku, name_ar, name_en, needs_diagnosis, sort) VALUES(?,?,?,?,?,?)');
+  [
+    ['screen', 'گۆڕینی شاشە', 'تبديل الشاشة', 'Screen replacement', 0],
+    ['battery', 'گۆڕینی باتری', 'تبديل البطارية', 'Battery replacement', 0],
+    ['charging', 'دەرچەی شەحن', 'منفذ الشحن', 'Charging port', 0],
+    ['back', 'شووشەی پشتەوە', 'الزجاج الخلفي', 'Back glass', 0],
+    ['camera', 'کامێرا', 'الكاميرا', 'Camera', 0],
+    ['audio', 'سپیکەر و مایک', 'السماعة والمايك', 'Speaker & mic', 0],
+    ['water', 'ئاو چووەتە ناوی', 'دخول ماء', 'Water damage', 1],
+    ['software', 'سۆفتوێر و هەڵگرتن', 'سوفتوير وتعليق', 'Software / stuck', 1],
+    ['other', 'کێشەیەکی تر', 'عطل آخر', 'Something else', 1],
+  ].forEach(([k, ku, ar, en, d], i) => svc.run(k, ku, ar, en, d, i));
+  // Demo price list (IQD) — the shop must replace with real prices.
+  const ids = Object.fromEntries(db.prepare('SELECT key, id FROM repair_services').all().map((r) => [r.key, r.id]));
+  const pr = db.prepare('INSERT INTO repair_prices(service_id, brand, model, price_original, price_copy, duration_min, warranty_original, warranty_copy) VALUES(?,?,?,?,?,?,?,?)');
+  const models = [
+    ['Apple', 'iPhone 11', 1], ['Apple', 'iPhone 12', 1.2], ['Apple', 'iPhone 13', 1.4], ['Apple', 'iPhone 13 Pro Max', 1.9], ['Apple', 'iPhone 14', 1.6],
+    ['Apple', 'iPhone 14 Pro Max', 2.4], ['Apple', 'iPhone 15', 1.9], ['Apple', 'iPhone 15 Pro Max', 2.8], ['Apple', 'iPhone 16 Pro Max', 3.2],
+    ['Samsung', 'Galaxy A54', 0.8], ['Samsung', 'Galaxy A55', 0.9], ['Samsung', 'Galaxy S22 Ultra', 1.9], ['Samsung', 'Galaxy S23 Ultra', 2.3], ['Samsung', 'Galaxy S24 Ultra', 2.7],
+    ['Xiaomi', 'Redmi Note 12', 0.5], ['Xiaomi', 'Redmi Note 13 Pro', 0.65],
+  ];
+  const r = (n) => Math.round(n / 5000) * 5000;
+  for (const [b, m, k] of models) {
+    pr.run(ids.screen, b, m, r(110000 * k), r(55000 * k), 60, 90, 30);
+    pr.run(ids.battery, b, m, r(45000 * Math.sqrt(k)), r(25000 * Math.sqrt(k)), 30, 180, 60);
+    pr.run(ids.charging, b, m, r(35000 * Math.sqrt(k)), null, 45, 90, 30);
+    pr.run(ids.back, b, m, r(40000 * k), r(25000 * k), 90, 60, 30);
+    pr.run(ids.camera, b, m, r(70000 * k), null, 60, 90, 30);
+    pr.run(ids.audio, b, m, r(30000 * Math.sqrt(k)), null, 45, 90, 30);
+  }
 }
 // Delivery zones: [{ name, fee }]. Built once from the old comma-separated "cities" list.
 if (db.prepare("SELECT 1 FROM settings WHERE key = 'delivery_zones'").get() == null) {

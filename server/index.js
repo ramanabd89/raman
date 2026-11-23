@@ -13,6 +13,7 @@ const { processUpload, ogImageFor } = require('./images');
 const { normalize, searchClause, relevance } = require('./search');
 const extrasModule = require('./extras');
 const smart = require('./smart');
+const repair = require('./repair');
 const { isStaff } = extrasModule;
 let extras = { recordStock: () => {}, pruneAnalytics: () => {} }; // filled in once the admin router exists
 
@@ -49,8 +50,9 @@ const ORDER_STATUSES = ['pending', 'preparing', 'shipping', 'delivered', 'cancel
 const ORDER_SOURCES = ['tiktok', 'instagram', 'facebook', 'snapchat', 'friend', 'influencer', 'google', 'store', 'other'];
 const PUBLIC_SETTINGS = ['store_name', 'delivery_fee', 'free_delivery_over', 'referral_reward', 'flash_sale_end',
   'search_tags', 'cities', 'whatsapp', 'instagram', 'facebook', 'tiktok', 'support_phone', 'delivery_zones', 'store_address', 'store_map_url', 'exchange_days', 'warranty_text',
-  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled'];
-const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_round', 'min_profit'];
+  'slogan', 'seo_description', 'maintenance_mode', 'maintenance_message', 'price_display', 'cashback_percent', 'usd_rate', 'tradein_enabled', 'repair_enabled'];
+const ADMIN_SETTINGS = [...PUBLIC_SETTINGS, 'max_pending_orders', 'confirm_over', 'usd_round', 'min_profit',
+  'repair_pickup', 'repair_pickup_fee', 'repair_free_diagnosis', 'repair_honest_pct', 'repair_open', 'repair_close', 'repair_closed_days', 'repair_slot_capacity'];
 // Secret admin address, e.g. ADMIN_PATH=/the-gate (default /admin).
 const ADMIN_PATH = '/' + String(process.env.ADMIN_PATH || '/admin').replace(/^\/+|\/+$/g, '').replace(/[^\w-]/g, '');
 const SESSION_DAYS = { customer: 30 }; // staff accounts: 7 days
@@ -634,6 +636,7 @@ const admin = express.Router();
 admin.use(requireAdmin);
 extras = extrasModule.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, requireUser, getSettings, setSetting, priceItems, repriceUsd, syncProductFromVariants });
 smart.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, getSettings, setSetting, productOut, variantsOf, publicVariant });
+repair.register(app, admin, { db, tx, wrap, HttpError, int, str, logAdmin, requireUser, getSettings, notify, escHtml, PUBLIC_URL });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -675,6 +678,8 @@ admin.get('/stats', wrap((req, res) => {
     low_stock: db.prepare('SELECT id, name_ku, stock FROM products WHERE stock <= 3 ORDER BY stock LIMIT 10').all(),
     top: db.prepare('SELECT id, name_ku, sold, price FROM products ORDER BY sold DESC LIMIT 5').all(),
     recent: db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 8').all().map(adminOrderExtras),
+    open_repairs: one("SELECT COUNT(*) v FROM repairs WHERE status NOT IN ('delivered', 'cancelled')").v,
+    repairs_today: one("SELECT COUNT(*) v FROM repairs WHERE substr(appointment, 1, 10) = date('now', '+3 hours') AND status != 'cancelled'").v,
     sources: db.prepare("SELECT COALESCE(source, 'unknown') source, COUNT(*) orders, COALESCE(SUM(CASE WHEN status = 'delivered' THEN total + wallet_used END), 0) revenue FROM orders WHERE status != 'cancelled' GROUP BY 1 ORDER BY 2 DESC").all(),
     utm: db.prepare("SELECT utm, COUNT(*) orders FROM orders WHERE utm IS NOT NULL AND status != 'cancelled' GROUP BY utm ORDER BY 2 DESC LIMIT 10").all(),
     warnings: [

@@ -5,8 +5,9 @@ const crypto = require('crypto');
 // ---- staff roles: which admin sections each role may open ----
 const ROLE_SECTIONS = {
   admin: '*',
-  manager: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'products', 'catalog', 'stock', 'coupons', 'expenses', 'analytics', 'faqs', 'banners'],
-  orders: ['dashboard', 'orders', 'customers', 'carts', 'tradein'],
+  manager: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'repairs', 'products', 'catalog', 'stock', 'coupons', 'expenses', 'analytics', 'faqs', 'banners'],
+  orders: ['dashboard', 'orders', 'customers', 'carts', 'tradein', 'repairs'],
+  technician: ['dashboard', 'repairs'],
   products: ['dashboard', 'products', 'catalog', 'stock'],
 };
 const STAFF_ROLES = Object.keys(ROLE_SECTIONS);
@@ -16,7 +17,7 @@ const SECTION_OF = {
   stats: 'dashboard', orders: 'orders', users: 'customers', carts: 'carts',
   products: 'products', upload: 'products', 'bulk-price': 'products', 'variant-presets': 'products',
   categories: 'catalog', tags: 'catalog', stock: 'stock', coupons: 'coupons',
-  expenses: 'expenses', profit: 'expenses', tradeins: 'tradein', 'tradein-models': 'tradein', 'tradein-rules': 'tradein', analytics: 'analytics', faqs: 'faqs', banners: 'banners',
+  expenses: 'expenses', profit: 'expenses', tradeins: 'tradein', 'tradein-models': 'tradein', 'tradein-rules': 'tradein', repairs: 'repairs', 'repair-prices': 'repairs', 'repair-services': 'repairs', analytics: 'analytics', faqs: 'faqs', banners: 'banners',
 };
 function canAccess(role, section) {
   const allowed = ROLE_SECTIONS[role];
@@ -32,6 +33,7 @@ function register(app, admin, h) {
   admin.use((req, _res, next) => {
     const seg = req.path.split('/')[1] || '';
     if (seg === 'settings' && req.method === 'GET') return next(); // read-only, needed by product forms
+    if (seg === 'upload' && (canAccess(req.user.role, 'products') || canAccess(req.user.role, 'repairs'))) return next(); // product images, repair photos
     const section = SECTION_OF[seg] || 'admin_only';
     return canAccess(req.user.role, section) ? next() : next(new HttpError(403, 'forbidden'));
   });
@@ -135,9 +137,11 @@ function register(app, admin, h) {
           COALESCE(SUM(CASE WHEN oi.cost IS NULL THEN 1 END), 0) missing FROM order_items oi JOIN orders o ON o.id = oi.order_id
           WHERE o.status = 'delivered' AND substr(o.updated_at, 1, 7) = ?`).get(m);
       const ex = db.prepare('SELECT COALESCE(SUM(amount), 0) total FROM expenses WHERE substr(date, 1, 7) = ?').get(m).total;
+      const rp = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(COALESCE(final_price, quoted_price + approved_extra)), 0) revenue, COALESCE(SUM(parts_cost), 0) parts FROM repairs WHERE status = 'delivered' AND substr(updated_at, 1, 7) = ?").get(m);
       const byCat = db.prepare('SELECT category, SUM(amount) amount FROM expenses WHERE substr(date, 1, 7) = ? GROUP BY category ORDER BY 2 DESC').all(m);
       out.push({ month: m, orders: o.orders, sales: o.sales, delivery: o.delivery, wallet: o.wallet, cogs: c.cogs, missing_cost: c.missing,
-        gross: o.sales - c.cogs, expenses: ex, expenses_by_cat: byCat, net: o.sales - c.cogs - o.wallet - ex });
+        gross: o.sales - c.cogs, expenses: ex, expenses_by_cat: byCat, repairs: rp.n, repair_revenue: rp.revenue, repair_parts: rp.parts,
+        net: o.sales - c.cogs - o.wallet - ex + rp.revenue - rp.parts });
     }
     res.json(out);
   }));

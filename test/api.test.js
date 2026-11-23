@@ -369,6 +369,63 @@ let stop = () => {};
   check('"سامسونك" → only Samsung products', sam.length >= 3 && sam.every((x) => /samsung|galaxy/i.test(`${x.name_ku} ${x.name_en} ${x.brand}`)), sam.map((x) => x.name_en));
   check('"17" does not match 170 / 1700', !(await ids('17')).some((id) => id === 15));
 
+  // ---------- repairs ----------
+  r = await call('/repair/catalog');
+  check('repair catalog', r.data.enabled && r.data.services.length >= 8 && r.data.models.length >= 10, r.data);
+  const screenSvc = r.data.services.find((x) => x.key === 'screen');
+  const waterSvc = r.data.services.find((x) => x.key === 'water');
+  r = await call(`/repair/quote?brand=Apple&model=${encodeURIComponent('iPhone 13')}&service=${screenSvc.id}`);
+  check('repair quote: original + copy with warranty', r.data.options.length === 2 && r.data.options[0].quality === 'original' && r.data.options[0].warranty_days === 90, r.data);
+  r = await call(`/repair/quote?brand=Apple&model=${encodeURIComponent('iPhone 13')}&service=${waterSvc.id}`);
+  check('water damage → price after free diagnosis', r.data.needs_diagnosis && r.data.options[0].quality === 'diagnosis', r.data);
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { repair_honest_pct: '10' } });
+  r = await call(`/repair/quote?brand=Apple&model=${encodeURIComponent('iPhone 13')}&service=${screenSvc.id}`);
+  check('honest advice when repair costs too much vs phone value', r.data.advice && r.data.advice.phone_value === 500000, r.data);
+  await call('/admin/settings', { method: 'PUT', token: A2, body: { repair_honest_pct: '50', repair_closed_days: '', repair_open: '0', repair_close: '24', repair_slot_capacity: '1' } });
+  const tomorrow = new Date(Date.now() + 3 * 3600e3 + 864e5).toISOString().slice(0, 10);
+  r = await call(`/repair/slots?date=${tomorrow}`);
+  const slot = r.data[0];
+  check('appointment slots listed', r.data.length === 24 && slot.free === 1, r.data.length);
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'walkin', appointment: slot.slot, problem: 'lines on screen' } });
+  const RP = r.data;
+  check('repair booked with code, price and warranty', /^R[A-Z0-9]{6}$/.test(RP.code) && RP.quoted_price === 155000 && RP.warranty_days === 90 && RP.status === 'booked', RP);
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'walkin', appointment: slot.slot } });
+  check('full slot cannot be double-booked', r.data.error === 'repair_slot', r.data);
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'pickup', city: 'Erbil', address: 'x' } });
+  check('pickup booking adds pickup fee', r.data.pickup_fee === 5000 && r.data.total === 160000, r.data);
+  await call(`/repairs/${r.data.code}/cancel`, { method: 'POST', token: Q });
+  check('customer can cancel a booked repair', (await call(`/repairs/${r.data.code}`, { token: Q })).data.status === 'cancelled');
+  check('customer never sees parts cost / technician', (await call(`/repairs/${RP.code}`, { token: Q })).data.parts_cost === undefined);
+  check('other customers cannot see the repair', (await call(`/repairs/${RP.code}`, { token: U })).status === 404 || (await call(`/repairs/${RP.code}`, { token: U })).status === 401);
+  // workshop flow
+  const rid = RP.id;
+  await call(`/admin/repairs/${rid}`, { method: 'PUT', token: A2, body: { status: 'received', imei: '356700000000001', technician: 'Karwan' } });
+  await call(`/admin/repairs/${rid}`, { method: 'PUT', token: A2, body: { status: 'diagnosing' } });
+  r = await call(`/admin/repairs/${rid}/extra`, { method: 'POST', token: A2, body: { price: 30000, note: 'Face ID flex damaged' } });
+  check('extra cost request waits for the customer', r.data.status === 'awaiting_approval' && r.data.extra_status === 'pending', r.data);
+  r = await call(`/repairs/${RP.code}/decision`, { method: 'POST', token: Q, body: { approve: true } });
+  check('customer approves → repairing, extra added', r.data.status === 'repairing' && r.data.approved_extra === 30000 && r.data.total === 185000, r.data);
+  r = await call(`/repairs/${RP.code}/decision`, { method: 'POST', token: Q, body: { approve: true } });
+  check('cannot approve twice', r.data.error === 'repair_no_request', r.data);
+  await call(`/admin/repairs/${rid}`, { method: 'PUT', token: A2, body: { status: 'testing', parts_cost: 90000, old_part_returned: true } });
+  r = await call(`/admin/repairs/${rid}`, { method: 'PUT', token: A2, body: { status: 'delivered' } });
+  check('delivered → warranty until +90 days', r.data.warranty_until && r.data.warranty_until > tomorrow, r.data);
+  r = await call(`/warranty/${RP.code.toLowerCase()}`);
+  check('public warranty check (no personal data)', r.data.valid === true && r.data.customer_name === undefined && r.data.phone === undefined, r.data);
+  check('timeline recorded', (await call(`/repairs/${RP.code}`, { token: Q })).data.events.length >= 6);
+  r = await call('/admin/profit?months=1', { token: A2 });
+  check('profit includes repair revenue − parts', r.data[0].repair_revenue === 185000 && r.data[0].repair_parts === 90000, r.data[0]);
+  // warranty claim: same IMEI comes back
+  const slot2 = (await call(`/repair/slots?date=${tomorrow}`)).data.find((x) => x.free > 0);
+  r = await call('/repairs', { method: 'POST', token: Q, body: { brand: 'Apple', model: 'iPhone 13', service_id: screenSvc.id, quality: 'original', method: 'walkin', appointment: slot2.slot, imei: '356700000000001' } });
+  r = await call('/admin/repairs?status=open', { token: A2 });
+  check('returning IMEI flagged as warranty claim', r.data.some((x) => x.warranty_claim && x.warranty_claim.code === RP.code), r.data.map((x) => x.warranty_claim));
+  // technician role sees repairs only
+  await call('/admin/staff', { method: 'POST', token: A2, body: { phone: '07508080808', role: 'technician' } });
+  const TEC = (await call('/auth/login', { method: 'POST', body: { phone: '07508080808', password: 'staff123' } })).data.token;
+  check('technician can open repairs', (await call('/admin/repairs', { token: TEC })).status === 200);
+  check('technician cannot open orders', (await call('/admin/orders', { token: TEC })).status === 403);
+
   console.log(`\n${ok} passed, ${bad} failed`);
   stop();
   process.exit(bad ? 1 : 0);
