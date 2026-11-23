@@ -365,20 +365,52 @@
           <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b><small>${T('finderSub')}</small></a>
           ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b><small>${T('tiCheck')}</small></a>` : ''}
         </div>
-        ${S.settings.repair_enabled === '1' ? `<div class="repair-home">
-          <a class="rh-main" href="#/repair"><span class="rh-ic">${I.wrench}</span><span class="rh-txt"><b>${T('repairTitle')}</b><small>${T('repairHomeSub')}</small></span><span class="rh-go">${I.chev}</span></a>
-          <div class="rh-svcs">${[['screen', '📱'], ['battery', '🔋'], ['charging', '🔌'], ['back', '🪟'], ['water', '💧']].map(([k, ic]) => `<a href="#/repair?start=1"><span>${ic}</span>${T(`rh_${k}`)}</a>`).join('')}</div>
-          <a class="btn btn-primary btn-block rh-cta" href="#/repair?start=1">${I.wrench}${T('repairHomeCta')}</a>
-        </div>` : ''}
+        ${S.settings.repair_enabled === '1' ? `<section class="repair-ad" id="repairAd" aria-label="${esc(T('repairTitle'))}">
+          <svg class="ra-art" viewBox="0 0 120 200" aria-hidden="true"><rect x="10" y="6" width="100" height="188" rx="18" fill="#0F1220" stroke="#3A4060" stroke-width="3"/>
+            <rect x="18" y="16" width="84" height="168" rx="12" fill="url(#raG)"/><defs><linearGradient id="raG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2B3150"/><stop offset="1" stop-color="#151A2E"/></linearGradient></defs>
+            <path class="ra-crack" d="M70 40 L58 72 L74 88 L52 118 L66 132 L48 170 M58 72 L36 80 M74 88 L96 96 M52 118 L30 128" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".75"/>
+            <circle class="ra-spark" cx="70" cy="40" r="5" fill="#F0904A"/></svg>
+          <div class="ra-body">
+            <span class="ra-tag">${I.wrench}${T('repairTitle')}</span>
+            <div class="ra-hooks" aria-live="polite">${[1, 2, 3, 4].map((n, i) => `<div class="ra-hook ${i === 0 ? 'on' : ''}" data-hook="${n}"><b>${T(`hk${n}q`)}</b><span>${T(`hk${n}a`)}</span></div>`).join('')}</div>
+            <div class="ra-dots">${[0, 1, 2, 3].map((i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
+            <div class="ra-chips"><span>${I.shield}${T('chipWarranty')}</span><span>${I.swap}${T('chipOld')}</span><span id="raFree">${I.check}${T('chipPrice')}</span></div>
+            <div class="ra-from" id="raFrom"></div>
+            <a class="btn btn-primary ra-cta" href="#/repair?start=1">${I.wrench}${T('repairHomeCta')}</a>
+            <div class="rh-svcs">${[['screen', '📱'], ['battery', '🔋'], ['charging', '🔌'], ['back', '🪟'], ['water', '💧']].map(([k, ic]) => `<a href="#/repair?start=1"><span>${ic}</span>${T(`rh_${k}`)}</a>`).join('')}</div>
+          </div>
+        </section>` : ''}
         <div id="flash"></div>
         <div class="sort-tabs" id="sortTabs"></div>
         <div id="grid">${gridSkeleton()}</div>
       </div>`;
     renderSortTabs(() => loadGrid({}));
+    startRepairAd();
     const [banners, flash] = await Promise.all([api('/banners').catch(() => []), api('/products?flash=1&limit=12').catch(() => [])]);
     renderSlider(banners);
     renderFlash(flash);
     loadGrid({});
+  }
+
+  // Home-page repair ad: rotating "problem? → our answer" hooks + the cheapest real repair price.
+  let adTimer;
+  async function startRepairAd() {
+    clearInterval(adTimer);
+    const ad = $('#repairAd'); if (!ad) return;
+    const cat = await api('/repair/catalog').catch(() => null);
+    if (!document.body.contains(ad)) return;
+    if (cat && cat.from_price) $('#raFrom').innerHTML = `${esc(T('fromPrice', { x: '' }))} ${money(cat.from_price)}`;
+    if (cat && cat.free_diagnosis) $('#raFree').innerHTML = `${I.check}${T('chipFree')}`;
+    else ad.querySelector('[data-hook="3"] span').textContent = T('hk3b');
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const hooks = ad.querySelectorAll('.ra-hook'); const dots = ad.querySelectorAll('.ra-dots i');
+    let i = 0;
+    adTimer = setInterval(() => {
+      if (!document.body.contains(ad)) return clearInterval(adTimer);
+      i = (i + 1) % hooks.length;
+      hooks.forEach((h, n) => h.classList.toggle('on', n === i));
+      dots.forEach((d, n) => d.classList.toggle('on', n === i));
+    }, 3800);
   }
 
   function renderSortTabs(onChange) {

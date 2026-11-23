@@ -92,6 +92,10 @@ window.I18N = {
     howTitle: 'چۆن کار دەکات؟', how1: 'نرخ ببینە و کات هەڵبژێرە', how2: 'پشکنینی بەخۆڕایی و ڕەزامەندیت', how3: 'چاککردنەوە + وێنە + پارچە کۆنەکە', how4: 'گەرەنتی نووسراو',
     err_repair_slot: 'ئەم کاتە پڕ بوو، کاتێکی تر هەڵبژێرە', err_repair_disabled: 'بەشی چاککردنەوە لە ئێستادا داخراوە', err_repair_no_request: 'هیچ داواکارییەک نییە',
     budgetCustom: 'یان بودجەکەت بنووسە (دینار)', repairHomeSub: 'شاشە، باتری، شەحن و زیاتر — نرخی ڕوون و گەرەنتی نووسراو', repairHomeCta: 'نرخ ببینە و کات دیاری بکە', rh_screen: 'شاشە', rh_battery: 'باتری', rh_charging: 'شەحن', rh_back: 'پشتەوە', rh_water: 'ئاو',
+    hk1q: 'شاشەکەت شکاوە؟', hk1a: 'وەک نوێی دەکەینەوە — و لەبەردەمت چاکی دەکەین', hk2q: 'باتریەکەت پێش نیوەڕۆ تەواو دەبێت؟', hk2a: 'باتری نوێ بە گەرەنتییەوە، تا چاکەت دەخۆیتەوە ☕',
+    hk3q: 'مۆبایلەکەت شەحن ناکات؟', hk3a: 'زۆربەی جار کێشەکە سادەیە — پشکنینیش بەخۆڕاییە', hk3b: 'دەیپشکنین و پێش دەستلێدان نرخەکەت پێ دەڵێین',
+    hk4q: 'دەترسیت پارچەکانی مۆبایلەکەت بگۆڕن؟', hk4a: 'پارچە کۆنەکەت دەدەینەوە دەستت، لەگەڵ گەرەنتی نووسراو',
+    fromPrice: 'چاککردنەوە لە {x} دەست پێدەکات', chipWarranty: 'گەرەنتی نووسراو', chipOld: 'پارچە کۆنەکە هی خۆتە', chipFree: 'پشکنینی بەخۆڕایی', chipPrice: 'نرخی ڕوون',
     shareMsg: 'لە {s} داوای مۆبایل و ئەکسسوار بکە! کۆدی داوەتی من: {c}', bestQuality: 'باشترین کوالێتی و مۆدێل',
   },
   ar: {
@@ -186,6 +190,10 @@ window.I18N = {
     howTitle: 'شلون تشتغل؟', how1: 'شوف السعر واختار موعد', how2: 'فحص مجاني وموافقتك', how3: 'تصليح + صور + القطعة القديمة', how4: 'ضمان مكتوب',
     err_repair_slot: 'هذا الموعد انحجز، اختر وقت ثاني', err_repair_disabled: 'قسم التصليح متوقف حالياً', err_repair_no_request: 'ماكو طلب',
     budgetCustom: 'أو اكتب ميزانيتك (دينار)', repairHomeSub: 'شاشة، بطارية، شحن وأكثر — سعر واضح وضمان مكتوب', repairHomeCta: 'شوف السعر واحجز موعد', rh_screen: 'شاشة', rh_battery: 'بطارية', rh_charging: 'شحن', rh_back: 'ظهر', rh_water: 'ماي',
+    hk1q: 'شاشتك انكسرت؟', hk1a: 'نرجعها مثل الجديدة — وتشوفنا نصلحها قدام عينك', hk2q: 'بطاريتك تخلص قبل الظهر؟', hk2a: 'بطارية جديدة بضمان، وانت قاعد تشرب چاي ☕',
+    hk3q: 'موبايلك ما يشحن؟', hk3a: 'أغلب الأحيان العطل بسيط — والفحص علينا مجاناً', hk3b: 'نفحصه ونقولك السعر قبل لا نلمسه',
+    hk4q: 'خايف يبدلون قطع موبايلك؟', hk4a: 'القطعة القديمة ترجعلك بإيدك، ويا ضمان مكتوب',
+    fromPrice: 'التصليح يبدأ من {x}', chipWarranty: 'ضمان مكتوب', chipOld: 'القطعة القديمة إلك', chipFree: 'فحص مجاني', chipPrice: 'سعر واضح',
     shareMsg: 'اطلب موبايلات وإكسسوارات من {s}! كود الدعوة: {c}', bestQuality: 'أفضل جودة وأحدث موديلات',
   },
   en: {
@@ -280,6 +288,10 @@ window.I18N = {
     howTitle: 'How it works', how1: 'See the price, pick a time', how2: 'Free check and your approval', how3: 'Repair + photos + old part', how4: 'Written warranty',
     err_repair_slot: 'That time was just taken, pick another', err_repair_disabled: 'Repairs are paused right now', err_repair_no_request: 'No request',
     budgetCustom: 'Or type your budget (IQD)', repairHomeSub: 'Screen, battery, charging & more — clear prices, written warranty', repairHomeCta: 'See prices & book', rh_screen: 'Screen', rh_battery: 'Battery', rh_charging: 'Charging', rh_back: 'Back glass', rh_water: 'Water',
+    hk1q: 'Cracked screen?', hk1a: 'Good as new — and you can watch us fix it', hk2q: 'Battery dead by noon?', hk2a: 'A new battery with warranty, before your tea gets cold ☕',
+    hk3q: "Phone won't charge?", hk3a: "It's usually a small fix — and the check-up is on us", hk3b: 'We check it and tell you the price before we touch it',
+    hk4q: 'Worried they’ll swap your parts?', hk4a: 'Your old part goes back in your hand, with a written warranty',
+    fromPrice: 'Repairs from {x}', chipWarranty: 'Written warranty', chipOld: 'Old part is yours', chipFree: 'Free check-up', chipPrice: 'Clear prices',
     shareMsg: 'Order phones & accessories from {s}! My invite code: {c}', bestQuality: 'Best quality & latest models',
   },
 };

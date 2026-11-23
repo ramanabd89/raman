@@ -49,6 +49,10 @@ function register(app, admin, h) {
       enabled: true, services: services(),
       models: db.prepare('SELECT DISTINCT brand, model FROM repair_prices WHERE active = 1 ORDER BY brand, model').all(),
       pickup: s.repair_pickup === '1', pickup_fee: int(s.repair_pickup_fee, 0), free_diagnosis: s.repair_free_diagnosis === '1',
+      // "repairs from X" for the home-page ad: cheapest listed price
+      from_price: db.prepare(`SELECT MIN(p) v FROM (SELECT price_copy p FROM repair_prices WHERE active = 1 AND price_copy > 0
+        UNION ALL SELECT price_original FROM repair_prices WHERE active = 1 AND price_original > 0)`).get().v || null,
+      fastest_min: db.prepare('SELECT MIN(duration_min) v FROM repair_prices WHERE active = 1').get().v || null,
     });
   }));
   app.get('/api/repair/quote', wrap((req, res) => {

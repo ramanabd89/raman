@@ -610,3 +610,36 @@ table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
 .rh-svcs a { background: rgba(255,255,255,.08); border-radius: 14px; padding: 10px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #fff; font-size: 12.5px; font-weight: 700; }
 .rh-svcs a span { font-size: 22px; }
 .rh-cta { padding: 13px; }
+
+/* home: repair ad */
+.repair-ad { position: relative; overflow: hidden; border-radius: 24px; margin: -6px 0 22px; padding: 18px 18px 16px; color: #fff;
+  background: radial-gradient(120% 90% at 100% 0%, #3A2A55 0%, transparent 55%), linear-gradient(160deg, #1A1D2E, #232843); box-shadow: 0 14px 34px rgba(26,29,46,.25); }
+.ra-art { position: absolute; width: 104px; top: 16px; inset-inline-end: 12px; opacity: .95; transform: rotate(8deg); }
+[dir=rtl] .ra-art { transform: rotate(-8deg); }
+.ra-crack { stroke-dasharray: 220; stroke-dashoffset: 220; animation: ra-crack 1.6s .3s ease-out forwards; }
+.ra-spark { animation: ra-pulse 2s ease-in-out infinite; transform-origin: 70px 40px; }
+@keyframes ra-crack { to { stroke-dashoffset: 0; } }
+@keyframes ra-pulse { 50% { transform: scale(1.6); opacity: .4; } }
+.ra-body { position: relative; z-index: 1; }
+.ra-tag { display: inline-flex; align-items: center; gap: 6px; background: rgba(240,144,74,.18); color: #FFB27E; border: 1px solid rgba(240,144,74,.35); border-radius: 999px; padding: 4px 12px; font-weight: 800; font-size: 13px; }
+.ra-tag svg { width: 15px; height: 15px; }
+.ra-hooks { position: relative; min-height: 104px; margin: 12px 0 6px; padding-inline-end: 104px; }
+.ra-hook { position: absolute; inset: 0; opacity: 0; transform: translateY(10px); transition: opacity .5s, transform .5s; pointer-events: none; }
+.ra-hook.on { opacity: 1; transform: none; position: relative; pointer-events: auto; }
+.ra-hook b { display: block; font-size: clamp(21px, 6vw, 28px); line-height: 1.25; margin-bottom: 6px; }
+.ra-hook span { display: block; color: #D6DAE6; font-size: 15px; line-height: 1.55; font-weight: 600; }
+.ra-dots { display: flex; gap: 5px; margin-bottom: 12px; }
+.ra-dots i { width: 7px; height: 7px; border-radius: 4px; background: rgba(255,255,255,.25); transition: width .3s, background .3s; }
+.ra-dots i.on { width: 22px; background: var(--brand-2); }
+.ra-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ra-chips span { display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,.08); border-radius: 10px; padding: 5px 10px; font-size: 12.5px; font-weight: 700; }
+.ra-chips svg { width: 14px; height: 14px; color: #6EE7B7; }
+.ra-from { font-weight: 700; color: #D6DAE6; margin-bottom: 12px; min-height: 22px; }
+.ra-from .price { color: #fff; font-size: 20px; }
+.ra-from .price small { color: #D6DAE6; }
+.ra-cta { width: 100%; padding: 14px; font-size: 15.5px; }
+.repair-ad .rh-svcs { margin: 12px 0 0; }
+@media (prefers-reduced-motion: reduce) { .ra-crack { animation: none; stroke-dashoffset: 0; } .ra-spark { animation: none; } .ra-hook { transition: none; } }
+/* all hooks share one grid cell → the card keeps the height of the longest hook (no page jump) */
+.ra-hooks { display: grid; min-height: 0; }
+.ra-hook, .ra-hook.on { grid-area: 1 / 1; position: static; }
