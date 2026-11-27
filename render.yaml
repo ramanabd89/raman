@@ -2,7 +2,7 @@
 # Note: on the free plan the disk is temporary, so data and uploaded images reset when the service restarts or redeploys.
 services:
   - type: web
-    name: raman-mobile
+    name: ramanphone
     runtime: node
     plan: free
     buildCommand: npm install

@@ -431,7 +431,7 @@ function seed() {
   console.log('Seeding database with demo data...');
 
   const defaults = {
-    store_name: 'Raman Mobile',
+    store_name: 'RamanPhone',
     delivery_fee: '5000',
     free_delivery_over: '100000',
     referral_reward: '5000',
@@ -534,6 +534,8 @@ CREATE INDEX IF NOT EXISTS idx_repair_comments ON repair_comments(repair_id, id)
 `);
 
 seed();
+// rename: shops still on the old default name become RamanPhone (a name the owner chose is kept)
+db.prepare("UPDATE settings SET value = 'RamanPhone' WHERE key = 'store_name' AND value = 'Raman Mobile'").run();
 for (const [k, v] of Object.entries({ max_pending_orders: '2', confirm_over: '1000000', usd_rate: '', usd_round: '250', store_address: '', store_map_url: '', exchange_days: '3', warranty_text: '',
   slogan: '', seo_description: '', maintenance_mode: '0', maintenance_message: '', price_display: 'iqd', min_profit: '0', cashback_percent: '0',
   proof_enabled: '1', reviews_enabled: '1', reviews_buyers_only: '1', bundle_discount_percent: '0', store_hours: '',
