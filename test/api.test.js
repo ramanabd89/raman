@@ -5,7 +5,8 @@ const os = require('os');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const PORT = 3900 + Math.floor(Math.random() * 90);
-const B = `http://localhost:${PORT}/api`;
+// API_URL=http://host/api runs the same checks against another server (e.g. the PHP version) instead of starting Node
+const B = process.env.API_URL || `http://localhost:${PORT}/api`;
 const { hotp } = require('../server/totp.js');
 let ok = 0, bad = 0;
 const check = (name, cond, extra) => { cond ? ok++ : bad++; console.log(`${cond ? '✔' : '✘'} ${name}${cond ? '' : ' → ' + JSON.stringify(extra)}`); };
@@ -15,6 +16,7 @@ async function call(path, { method = 'GET', body, token } = {}) {
 }
 const totpNow = (secret) => hotp(secret, Math.floor(Date.now() / 30000));
 async function startServer() {
+  if (process.env.API_URL) return () => {};
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'store-test-'));
   const srv = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), DATA_DIR: path.join(dir, 'db'), UPLOAD_DIR: path.join(dir, 'up'), SMS_PROVIDER: 'console', NODE_ENV: 'test', ADMIN_PHONE: '07500000000', ADMIN_PASSWORD: 'admin123', TELEGRAM_BOT_TOKEN: '' },
@@ -115,7 +117,7 @@ let stop = () => {};
   check('daily backup exists', r.data.length >= 1, r);
   const dl = await fetch(B + '/admin/backups/download?name=now', { headers: { authorization: 'Bearer ' + A2 } });
   const buf = Buffer.from(await dl.arrayBuffer());
-  check('backup download is a SQLite file', buf.subarray(0, 15).toString() === 'SQLite format 3', buf.subarray(0, 16).toString());
+  check('backup download is a database file (SQLite for Node, SQL dump for PHP)', buf.subarray(0, 15).toString() === 'SQLite format 3' || buf.subarray(0, 20).toString() === '-- RamanPhone backup', buf.subarray(0, 20).toString());
   r = await fetch(B + '/admin/backups/download?name=../store.db', { headers: { authorization: 'Bearer ' + A2 } });
   check('backup path traversal rejected', r.status === 400);
   r = await call('/admin/backups', { token: U });
