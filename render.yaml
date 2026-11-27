@@ -29,7 +29,7 @@ services:
       - key: UPLOAD_DIR
         value: /var/data/uploads
       - key: PUBLIC_URL
-        value: https://ramanphone.com
+        value: https://www.ramanphone.com
       - key: ADMIN_PATH        # secret admin address, e.g. /my-panel-2026
         sync: false
       - key: ADMIN_PHONE       # the owner's phone, e.g. 07501234567
