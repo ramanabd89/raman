@@ -1,19 +1,35 @@
-# Render.com blueprint — free web service for previewing the store.
-# Note: on the free plan the disk is temporary, so data and uploaded images reset when the service restarts or redeploys.
+# Render.com blueprint for the live store (New → Blueprint → pick this repository).
+# Paid "starter" plan + a 1 GB disk, so orders, customers and uploaded photos are kept across restarts and deploys.
+# Render asks for the values marked sync: false when you create the blueprint.
 services:
   - type: web
     name: ramanphone
     runtime: node
-    plan: free
+    plan: starter
+    branch: claude/fervent-johnson-j96kpi
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/settings
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: NODE_ENV
+        value: production
       - key: TRUST_PROXY
         value: "1"
-      - key: ADMIN_PHONE
+      - key: DATA_DIR
+        value: /var/data
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: PUBLIC_URL        # e.g. https://ramanphone.com
         sync: false
-      - key: ADMIN_PASSWORD
+      - key: ADMIN_PATH        # secret admin address, e.g. /my-panel-2026
+        sync: false
+      - key: ADMIN_PHONE       # the owner's phone, e.g. 07501234567
+        sync: false
+      - key: ADMIN_PASSWORD    # a strong password
         sync: false
