@@ -10,6 +10,9 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/settings
+    domains:
+      - ramanphone.com
+      - www.ramanphone.com
     disk:
       name: data
       mountPath: /var/data
@@ -25,8 +28,8 @@ services:
         value: /var/data
       - key: UPLOAD_DIR
         value: /var/data/uploads
-      - key: PUBLIC_URL        # e.g. https://ramanphone.com
-        sync: false
+      - key: PUBLIC_URL
+        value: https://ramanphone.com
       - key: ADMIN_PATH        # secret admin address, e.g. /my-panel-2026
         sync: false
       - key: ADMIN_PHONE       # the owner's phone, e.g. 07501234567
