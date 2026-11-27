@@ -194,6 +194,8 @@
       <a href="#/orders" data-nav="orders">${T('myOrders')}</a>
       <a href="#/repair" data-nav="repair">${T('repairTitle')}</a>
       <a href="#/profile" data-nav="profile">${T('profile')}</a>`;
+    const fl = document.querySelector('.footer-links');
+    if (fl) fl.innerHTML = `<a href="#/faq">${T('faq')}</a> · <a href="#/support">${T('support')}</a>`;
     renderMenu();
   }
 
