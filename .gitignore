@@ -9,3 +9,6 @@
 !/uploads/*.svg
 *.log
 .DS_Store
+
+# downloadable copies of the code
+*.zip
