@@ -1,6 +1,11 @@
-node_modules/
-data/
-uploads/
-.env
+# local settings written by install.php (database password!)
+/config.php
+# backups and runtime files
+/storage/backups/*
+!/storage/backups/.htaccess
+# customer / admin uploads (demo images and the protection file are kept)
+/uploads/*
+!/uploads/.htaccess
+!/uploads/*.svg
 *.log
-/ramanphone-website.zip
+.DS_Store

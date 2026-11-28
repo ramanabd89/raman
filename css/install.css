@@ -1,0 +1,16 @@
+/* install.php */
+body{font-family:Vazirmatn,system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:#F4F5F8;color:#1A1D2E;margin:0;padding:24px 16px}
+.box{max-width:640px;margin:0 auto;background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+h1{margin:0 0 6px;font-size:24px}h2{font-size:17px;margin:22px 0 10px}p{color:#5B6070;line-height:1.7}
+label{display:block;font-weight:700;margin:12px 0 6px}
+input,select{width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #DDE1E8;border-radius:12px;font-size:16px;font-family:inherit;background:#fff}
+small{color:#7A8092}
+.btn{display:block;width:100%;margin-top:20px;padding:15px;border:0;border-radius:14px;background:#EE6C2D;color:#fff;font-size:17px;font-weight:800;text-align:center;text-decoration:none;cursor:pointer;font-family:inherit}
+.btn.danger{background:#D93B3B}
+.ok{color:#1F9D55}.bad{color:#D93B3B}
+.err{background:#FDECEC;color:#B42318;padding:12px 14px;border-radius:12px;margin:10px 0}
+.good{background:#E7F7EE;color:#14632F;padding:14px;border-radius:12px;margin-bottom:12px}
+ul{padding-inline-start:20px;line-height:1.9}code{background:#F2F4F7;padding:2px 6px;border-radius:6px;direction:ltr;display:inline-block}
+.langs{display:flex;gap:8px;justify-content:flex-end;margin-bottom:10px}
+.langs a{padding:6px 12px;border-radius:999px;background:#F2F4F7;color:#1A1D2E;text-decoration:none;font-weight:700;font-size:14px}
+.langs a.on{background:#EE6C2D;color:#fff}
