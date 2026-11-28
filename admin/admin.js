@@ -1,13 +1,17 @@
-/* Admin panel — vanilla JS. Uses the same session token as the storefront. */
+/* Admin panel — vanilla JS. Signs in with the same HttpOnly session cookie as the storefront; every change sends the CSRF header. */
 (() => {
   'use strict';
   const $ = (s, r = document) => r.querySelector(s);
   const root = $('#root');
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-  const safeImg = (u) => esc(/^(https?:\/\/|\/)/i.test(String(u || '')) ? u : '/img/placeholder.svg');
-  const getTok = () => { try { return JSON.parse(localStorage.getItem('token')); } catch { return null; } };
-  let token = getTok();
+  const BASE = (document.querySelector('meta[name="rp-base"]') || {}).content || '/';
+  const abs = (u) => (/^\/(uploads|img)\//.test(u) ? BASE + u.slice(1) : u);
+  const safeImg = (u) => esc(abs(/^(https?:\/\/|\/)/i.test(String(u || '')) ? u : '/img/placeholder.svg'));
+  const cookie = (n) => { const m = document.cookie.match(new RegExp(`(?:^|; )${n}=([^;]*)`)); return m ? decodeURIComponent(m[1]) : ''; };
+  const storeUrl = (r = '') => `${BASE}${window.ADMIN_LANG === 'ar' || window.ADMIN_LANG === 'en' ? window.ADMIN_LANG : 'ku'}/${r}`;
+  const printUrl = (kind, id, size) => `${BASE}print/${kind}/${id}?size=${size}&lang=${window.ADMIN_LANG || 'ar'}`;
+  try { localStorage.removeItem('token'); } catch { /* older versions kept a token here */ }
 
   const TI_ST = { pending: 'بانتظار الفحص', accepted: 'مقبول', adjusted: 'تم تعديل السعر', rejected: 'مرفوض (الزبون احتفظ بجهازه)', cancelled: 'ملغي' };
   const TI_Q = { screen: ['الشاشة', { perfect: 'سليمة', scratches: 'خدوش خفيفة', cracked: 'مكسورة' }], body: ['الهيكل', { perfect: 'مثل الجديد', scratches: 'خدوش', damaged: 'ضربات/ظهر مكسور' }],
@@ -18,10 +22,11 @@
   const ERR = { repair_closed: 'التصليح مُسلَّم ولا يمكن تغيير حالته',  tradein_model: 'الموديل غير متوفر',  coupon_exists: 'هذا الكود موجود مسبقاً',  usd_price_too_high: 'سعر الدولار غير منطقي (أكثر من 50,000$) — تأكد أنك كتبته بالدولار وليس بالدينار', usd_rate_missing: 'حدد سعر صرف الدولار من الإعدادات أولاً', invalid_city: 'مدينة غير موجودة في قائمة التوصيل', wrong_2fa_code: 'رمز التحقق غير صحيح', login_expired: 'انتهت المهلة، سجّل الدخول من جديد', already_enabled: 'التحقق بخطوتين مفعّل مسبقاً', wrong_credentials: 'الرقم أو كلمة المرور خطأ', forbidden: 'هذا الحساب ليس مديراً', invalid_input: 'يرجى ملء الحقول المطلوبة', too_many_attempts: 'محاولات كثيرة، حاول لاحقاً', order_cancelled: 'لا يمكن تغيير طلب ملغي', cannot_demote_self: 'لا يمكنك إزالة صلاحيتك', file_too_large: 'الصورة أكبر من 5MB', invalid_file: 'ملف غير صالح' };
 
   async function api(path, opts = {}) {
-    const headers = {};
+    const method = opts.method || 'GET';
+    const headers = { Accept: 'application/json' };
     if (!(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`/api${path}`, { method: opts.method || 'GET', headers, body: opts.body instanceof FormData ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined });
+    if (method !== 'GET') headers['X-CSRF-Token'] = cookie('rp_csrf');
+    const res = await fetch(`${BASE}api${path}`, { method, headers, credentials: 'same-origin', body: opts.body instanceof FormData ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) { if (path !== '/auth/login') { showLogin(ERR[data.error] || ''); } }
     if (!res.ok) { const e = new Error(ERR[data.error] || data.error || 'خطأ'); e.code = data.error; throw e; }
@@ -43,7 +48,7 @@
       <div class="field"><label>رقم الموبايل</label><input class="input num" name="phone" required style="text-align:start"></div>
       <div class="field"><label>كلمة المرور</label><input class="input" type="password" name="password" required></div>
       <button class="btn btn-primary btn-block">دخول</button>
-      <div class="switch-link"><a href="/">← العودة للمتجر</a></div></form></div>`;
+      <div class="switch-link"><a href="${storeUrl()}">← العودة للمتجر</a></div>${window.adminLangPicker ? window.adminLangPicker() : ''}</form></div>`;
     $('#lf').onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -51,8 +56,7 @@
         if (r.need_2fa) r = await askTwoFactor(r.ticket);
         if (!r) return;
         if (r.user.role === 'customer') return showLogin(ERR.forbidden);
-        token = r.token;
-        localStorage.setItem('token', JSON.stringify(r.token)); localStorage.setItem('user', JSON.stringify(r.user));
+        try { localStorage.setItem('user', JSON.stringify(r.user)); } catch { /* ignore */ }
         ME = null; location.hash = '#/dashboard'; render();
       } catch (err) { showLogin(err.message); }
     };
@@ -92,12 +96,12 @@
     root.innerHTML = `<div class="adm">
       <aside class="adm-side"><div class="logo"><span>لوحة التحكم</span><span class="dot"></span></div>
         <nav>${NAV.map(([group, items]) => { const vis = items.filter(([, , sec]) => allowed(sec)); return vis.length ? `<div class="nav-group">${group}</div>${vis.map(([k, l]) => `<a href="#/${k}" class="${k === active ? 'active' : ''}">${l}</a>`).join('')}` : ''; }).join('')}</nav>
-        <div class="bottom"><a href="/" target="_blank">🛒 فتح المتجر</a><button id="lo">↩ تسجيل الخروج</button></div></aside>
+        <div class="bottom"><a href="${storeUrl()}" target="_blank">🛒 فتح المتجر</a>${window.adminLangPicker ? window.adminLangPicker() : ''}<button id="lo">↩ تسجيل الخروج</button></div></aside>
       <div style="flex:1;min-width:0">
         <div class="adm-mobile-nav">${navItems().map(([k, l]) => `<a href="#/${k}" class="${k === active ? 'active' : ''}">${l}</a>`).join('')}</div>
         <div class="adm-main"><div class="adm-top"><h1>${title}</h1><div class="toolbar">${actions}</div></div><div id="content"><div class="spinner"></div></div></div>
       </div></div>`;
-    $('#lo').onclick = () => { api('/auth/logout', { method: 'POST' }).catch(() => {}); localStorage.removeItem('token'); localStorage.removeItem('user'); token = null; ME = null; showLogin(); };
+    $('#lo').onclick = () => { api('/auth/logout', { method: 'POST' }).catch(() => {}); try { localStorage.removeItem('user'); } catch { /* ignore */ } ME = null; showLogin(); };
     return $('#content');
   }
 
@@ -196,8 +200,11 @@
           <tr><td>العنوان</td><td>${esc(o.city)} — ${esc(o.address)}</td></tr>
           ${o.note ? `<tr><td>ملاحظة</td><td>${esc(o.note)}</td></tr>` : ''}
         </table>
+        <div class="row-actions" style="margin-top:12px"><a class="sm-btn primary" target="_blank" rel="noopener" href="${printUrl('order', o.id, 'a4')}">🖨️ طباعة A4</a><a class="sm-btn" target="_blank" rel="noopener" href="${printUrl('order', o.id, '80')}">🧾 طباعة إيصال 80mm</a></div>
         <h3 style="margin:16px 0 8px">المنتجات</h3>
-        <table class="t">${o.items.map((i) => `<tr><td><img src="${safeImg(i.image)}"></td><td>${esc(i.name)}${i.variant_label ? `<br><span class="muted">${esc(i.variant_label)}</span>` : ''}</td><td class="num">${fmt(i.price)} × ${i.qty}</td><td class="num"><b>${fmt(i.price * i.qty)}</b></td></tr>`).join('')}</table>
+        <table class="t">${o.items.map((i) => `<tr><td><img src="${safeImg(i.image)}"></td><td>${esc(i.name)}${i.variant_label ? `<br><span class="muted">${esc(i.variant_label)}</span>` : ''}${i.sku ? `<br><span class="muted num">SKU ${esc(i.sku)}</span>` : ''}
+          <form class="imei-row" data-imei="${i.id}"><input class="input sm num" name="imei" dir="ltr" maxlength="20" value="${esc(i.imei || '')}" placeholder="IMEI"><button class="sm-btn">حفظ IMEI</button></form></td><td class="num">${fmt(i.price)} × ${i.qty}</td><td class="num"><b>${fmt(i.price * i.qty)}</b></td></tr>`).join('')}</table>
+        <p class="muted" style="font-size:12px">سجّل IMEI للموبايلات المباعة — يُستخدم لفحص الضمان ويظهر على الفاتورة.</p>
         <table class="t" style="margin-top:10px">
           <tr><td>المنتجات</td><td class="num">${fmt(o.subtotal)}</td></tr>
           <tr><td>التوصيل</td><td class="num">${fmt(o.delivery_fee)}</td></tr>
@@ -206,7 +213,13 @@
           ${o.tradein ? `<tr><td>🔄 تبديل ${esc(o.tradein.label)} <span class="muted">(${esc(TI_ST[o.tradein.status] || o.tradein.status)})</span></td><td class="num">-${fmt(o.tradein_credit)}</td></tr>` : ''}
           ${o.wallet_used ? `<tr><td>من المحفظة</td><td class="num">-${fmt(o.wallet_used)}</td></tr>` : ''}
           <tr><td><b>المطلوب من الزبون</b></td><td class="num"><b>${fmt(o.total)} د.ع</b></td></tr>
-        </table>`);
+        </table>`, (m) => {
+        m.querySelectorAll('[data-imei]').forEach((f) => f.onsubmit = async (e) => {
+          e.preventDefault();
+          try { await api(`/admin/orders/${o.id}/items/${f.dataset.imei}/imei`, { method: 'PUT', body: { imei: f.imei.value.trim() } }); toast('تم حفظ IMEI'); }
+          catch (err) { toast(err.message); }
+        });
+      });
     }));
   }
   async function orders() {
@@ -347,12 +360,13 @@
       ['price', 'old_price'].forEach((n) => m.querySelector(`[name=${n}]`).addEventListener('input', refreshCur));
       const drawVars = () => {
         const box = m.querySelector('#variants');
-        box.innerHTML = variants.length ? `<table class="t var-table"><thead><tr><th>النوع (مثل 256GB · أسود)</th><th>السعر</th><th>السعر القديم</th><th>المخزون</th><th>سعر الشراء</th><th></th></tr></thead><tbody>${variants.map((v, i) => `<tr>
+        box.innerHTML = variants.length ? `<table class="t var-table"><thead><tr><th>النوع (مثل 256GB · أسود)</th><th>السعر</th><th>السعر القديم</th><th>المخزون</th><th>سعر الشراء</th><th>SKU</th><th></th></tr></thead><tbody>${variants.map((v, i) => `<tr>
           <td><input class="input sm" dir="ltr" data-v="${i}" data-k="label" value="${esc(v.label || '')}"></td>
           <td><input class="input sm num" type="number" min="0" step="any" data-v="${i}" data-k="price" value="${v.price ?? ''}"></td>
           <td><input class="input sm num" type="number" min="0" step="any" data-v="${i}" data-k="old_price" value="${v.old_price ?? ''}"></td>
           <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="stock" value="${v.stock ?? 0}"></td>
           <td><input class="input sm num" type="number" min="0" data-v="${i}" data-k="cost_price" value="${v.cost_price ?? ''}" placeholder="د.ع"></td>
+          <td><input class="input sm num" dir="ltr" maxlength="60" data-v="${i}" data-k="sku" value="${esc(v.sku || '')}"></td>
           <td><button type="button" class="sm-btn danger" data-rmv="${i}">×</button></td></tr>`).join('')}</tbody></table>` : '';
         box.querySelectorAll('[data-v]').forEach((inp) => inp.oninput = () => { variants[inp.dataset.v][inp.dataset.k] = inp.value; });
         box.querySelectorAll('[data-rmv]').forEach((b) => b.onclick = () => { variants.splice(Number(b.dataset.rmv), 1); drawVars(); });
@@ -572,7 +586,6 @@
       <div class="field"><label>🛡️ مربع «شلون تتأكد إنه أصلي؟» بصفحة الموبايل</label><select class="input" name="proof_enabled"><option value="1" ${s.proof_enabled !== '0' ? 'selected' : ''}>يظهر</option><option value="0" ${s.proof_enabled === '0' ? 'selected' : ''}>مخفي</option></select></div>
       ${F('slogan', 'شعار المتجر (جملة قصيرة تحت الاسم)')}
       ${F('seo_description', 'وصف المتجر لمحركات البحث ومعاينة الروابط')}
-      <div class="field"><label>عرض الأسعار</label><select class="input" name="price_display"><option value="iqd" ${s.price_display !== 'both' ? 'selected' : ''}>بالدينار فقط</option><option value="both" ${s.price_display === 'both' ? 'selected' : ''}>الدينار + تقريبي بالدولار</option></select></div>
       ${F('min_profit', '⚠️ أقل ربح مقبول لكل قطعة (د.ع) — تحذير إذا السعر قريب من سعر الشراء', 'number')}
       ${F('cashback_percent', '🎁 نقاط/كاش باك: نسبة ترجع لمحفظة الزبون بعد التوصيل (%) — 0 للإيقاف', 'number', 'min="0" max="50" step="0.5"')}
       <div class="field full maint"><label><input type="checkbox" name="maintenance_mode" value="1" ${s.maintenance_mode === '1' ? 'checked' : ''}> 🛠️ وضع الصيانة — المتجر يتوقف عن استقبال الطلبات ويظهر للزبائن رسالة</label>
@@ -591,7 +604,39 @@
       ${F('instagram', 'رابط انستغرام')}
       ${F('facebook', 'رابط فيسبوك')}
       ${F('tiktok', 'رابط تيك توك')}
+      <div class="field"><label>🌐 لغة المتجر الافتراضية</label><select class="input" name="default_lang">${[['ku', 'کوردی'], ['ar', 'العربية'], ['en', 'English']].map(([k, l]) => `<option value="${k}" ${(s.default_lang || 'ku') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      ${F('low_stock_threshold', '⚠️ تنبيه المخزون القليل عند (قطعة)', 'number', 'min="0"')}
+      <div class="field"><label>🛰️ السيرفر خلف Cloudflare / بروكسي</label><select class="input" name="trust_proxy"><option value="0" ${s.trust_proxy !== '1' ? 'selected' : ''}>لا</option><option value="1" ${s.trust_proxy === '1' ? 'selected' : ''}>نعم (اقرأ IP الزبون الحقيقي من البروكسي)</option></select></div>
+
+      <div class="field full set-sec"><h3>🔐 رسائل التحقق OTPIQ</h3><p class="muted">رمز الدخول يُرسل برسالة SMS أو واتساب عن طريق OTPIQ. خذ المفتاح من لوحة OTPIQ.</p></div>
+      <div class="field"><label>مفتاح OTPIQ API</label><input class="input" dir="ltr" autocomplete="off" name="otpiq_api_key" value="${esc(s.otpiq_api_key || '')}" placeholder="sk_live_..."></div>
+      <div class="field"><label>طريقة الإرسال</label><select class="input" name="otpiq_provider">${[['auto', 'تلقائي'], ['whatsapp-telegram-sms', 'واتساب ثم تيليجرام ثم SMS'], ['sms', 'SMS'], ['whatsapp', 'واتساب'], ['telegram', 'تيليجرام']].map(([k, l]) => `<option value="${k}" ${(s.otpiq_provider || 'auto') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="field"><label>وضع التجربة</label><select class="input" name="otp_test_mode"><option value="0" ${s.otp_test_mode !== '1' ? 'selected' : ''}>مطفأ — الرسائل تُرسل فعلاً</option><option value="1" ${s.otp_test_mode === '1' ? 'selected' : ''}>شغّال — الرمز يظهر على الشاشة ولا يُرسل</option></select></div>
+      ${F('otp_allowed_prefixes', 'بدايات الأرقام المسموحة (مثل 96475,96477,96478,96479)')}
+      <div class="field full"><div class="toolbar"><input class="input num" id="otpTestPhone" dir="ltr" placeholder="07XXXXXXXXX" style="max-width:220px"><button type="button" class="sm-btn primary" id="otpTest">📨 إرسال رسالة تجربة</button><span class="muted" id="otpTestRes"></span></div></div>
+
+      <div class="field full set-sec"><h3>✈️ إشعارات تيليجرام</h3><p class="muted">أنشئ بوت من BotFather، أرسل له رسالة، وحط رقم المحادثة (chat id) هنا.</p></div>
+      <div class="field"><label>الإشعارات</label><select class="input" name="telegram_enabled"><option value="0" ${s.telegram_enabled !== '1' ? 'selected' : ''}>مطفأة</option><option value="1" ${s.telegram_enabled === '1' ? 'selected' : ''}>شغّالة</option></select></div>
+      <div class="field"><label>لغة الرسائل</label><select class="input" name="telegram_lang">${[['ar', 'العربية'], ['ku', 'کوردی'], ['en', 'English']].map(([k, l]) => `<option value="${k}" ${(s.telegram_lang || 'ar') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="field"><label>توكن البوت</label><input class="input" dir="ltr" autocomplete="off" name="telegram_bot_token" value="${esc(s.telegram_bot_token || '')}" placeholder="123456:ABC..."></div>
+      <div class="field"><label>رقم المحادثة</label><input class="input num" dir="ltr" name="telegram_chat_id" value="${esc(s.telegram_chat_id || '')}" placeholder="-100..."></div>
+      <div class="field full"><label>أرسل إشعار عند</label><div class="f-chips">${[['tg_new_order', 'طلب جديد'], ['tg_high_value', 'طلب بقيمة عالية'], ['tg_order_cancelled', 'إلغاء طلب'], ['tg_new_repair', 'حجز تصليح'], ['tg_repair_decision', 'رد الزبون على كلفة إضافية'], ['tg_repair_comment', 'تعليق على تصليح'], ['tg_low_stock', 'مخزون قليل']].map(([k, l]) => `<label class="check-inline"><input type="checkbox" name="${k}" value="1" ${s[k] !== '0' ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
+      <div class="field full"><div class="toolbar"><button type="button" class="sm-btn primary" id="tgTest">✈️ إرسال رسالة تجربة</button><span class="muted" id="tgTestRes"></span></div></div>
+
+      <div class="field full set-sec"><h3>🔎 محركات البحث (SEO)</h3><p class="muted">عنوان ووصف الصفحة الرئيسية لكل لغة — يظهر في Google ومعاينة الروابط.</p></div>
+      ${['ku', 'ar', 'en'].map((l) => `${F(`seo_title_${l}`, `عنوان الصفحة (${l.toUpperCase()})`)}${F(`seo_description_${l}`, `الوصف (${l.toUpperCase()})`)}`).join('')}
     </div><button class="btn btn-primary">حفظ الإعدادات</button></form>`;
+    $('#otpTest').onclick = async () => {
+      const out = $('#otpTestRes'); out.textContent = '…';
+      try { const r = await api('/admin/settings/test-otp', { method: 'POST', body: { phone: $('#otpTestPhone').value } }); out.textContent = r.test_mode ? `وضع التجربة — الرمز ${r.dev_code}` : `تم الإرسال إلى ${r.phone}`; }
+      catch (err) { out.textContent = err.message; }
+    };
+    $('#tgTest').onclick = async () => {
+      const out = $('#tgTestRes'); out.textContent = '…';
+      const f = $('#sf');
+      try { const r = await api('/admin/settings/test-telegram', { method: 'POST', body: { telegram_bot_token: f.telegram_bot_token.value, telegram_chat_id: f.telegram_chat_id.value } }); out.textContent = r.ok ? 'وصلت الرسالة ✅' : `فشل: ${r.error || ''}`; }
+      catch (err) { out.textContent = err.message; }
+    };
     let zones = [];
     try { zones = JSON.parse(s.delivery_zones || '[]'); } catch { zones = []; }
     const drawZones = () => {
@@ -612,6 +657,7 @@
       body.flash_sale_end = body.flash_sale_end ? new Date(body.flash_sale_end).toISOString() : '';
       body.delivery_zones = JSON.stringify(zones.filter((z) => String(z.name).trim()).map((z) => ({ name: String(z.name).trim(), fee: Number(z.fee) || 0, eta: String(z.eta || '').trim() })));
       body.maintenance_mode = e.target.maintenance_mode.checked ? '1' : '0';
+      ['tg_new_order', 'tg_high_value', 'tg_order_cancelled', 'tg_new_repair', 'tg_repair_decision', 'tg_repair_comment', 'tg_low_stock'].forEach((k) => { body[k] = e.target[k].checked ? '1' : '0'; });
       const rateChanged = String(body.usd_rate || '') !== String(s.usd_rate || '') || String(body.usd_round) !== String(s.usd_round || '250');
       if (rateChanged && body.usd_rate && !confirm(`سيتم تحديث أسعار كل المنتجات المسعّرة بالدولار حسب ${fmt(body.usd_rate)} د.ع. متابعة؟`)) return;
       try { Object.assign(s, await api('/admin/settings', { method: 'PUT', body })); toast(rateChanged ? 'تم الحفظ وتحديث الأسعار' : 'تم الحفظ'); } catch (err) { toast(err.message); }
@@ -625,7 +671,7 @@
       const list = await api('/admin/coupons');
       const origin = location.origin;
       c.innerHTML = `<div class="card panel" style="background:#FFFBF7;border:2px solid #FBE2D3"><b>💡 فكرة:</b> أعطِ كل مؤثر كوداً باسمه (مثل ALI10) ورابطاً خاصاً
-        <code class="num">${esc(origin)}/?src=ali</code> — وتشوف هنا كم طلب ومبيعات جاب كل واحد، فتدفع للي يبيع فعلاً.</div>
+        <code class="num">${esc(origin + storeUrl())}?src=ali</code> — وتشوف هنا كم طلب ومبيعات جاب كل واحد، فتدفع للي يبيع فعلاً.</div>
         <div class="card panel">${list.length ? `<table class="t"><thead><tr><th>الكود</th><th>لمن</th><th>الخصم</th><th>الشروط</th><th>الاستخدام</th><th>طلبات</th><th>مبيعات مُسلّمة</th><th>خصم مُعطى</th><th>الحالة</th><th></th></tr></thead><tbody>
         ${list.map((x) => `<tr>
           <td class="num"><b>${esc(x.code)}</b></td><td>${esc(x.owner || '—')}</td>
@@ -694,9 +740,9 @@
     c.querySelectorAll('[data-dl]').forEach((b) => b.onclick = async () => {
       b.disabled = true;
       try {
-        const res = await fetch(`/api/admin/backups/download?name=${encodeURIComponent(b.dataset.dl)}`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${BASE}api/admin/backups/download?name=${encodeURIComponent(b.dataset.dl)}`, { credentials: 'same-origin' });
         if (!res.ok) throw new Error('فشل التنزيل');
-        const name = (res.headers.get('content-disposition') || '').match(/filename="?([^"]+)"?/)?.[1] || 'store-backup.db';
+        const name = (res.headers.get('content-disposition') || '').match(/filename="?([^"]+)"?/)?.[1] || 'store-backup.sql';
         const a = document.createElement('a'); a.href = URL.createObjectURL(await res.blob()); a.download = name; a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 5000);
       } catch (e) { toast(e.message); }
@@ -752,6 +798,10 @@
     c.querySelectorAll('[data-label]').forEach((b) => b.onclick = () => printLabel(list.find((x) => x.id === Number(b.dataset.label))));
   }
   function printLabel(r) {
+    const w = window.open(printUrl('repair', r.id, '80'), '_blank', 'noopener');
+    if (!w) toast('اسمح بالنوافذ المنبثقة');
+  }
+  function printLabelLegacy(r) {
     const w = window.open('', '_blank', 'width=420,height=320');
     if (!w) return toast('اسمح بالنوافذ المنبثقة');
     w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(r.code)}</title><style>body{font-family:system-ui,sans-serif;margin:12px}h1{font-size:28px;letter-spacing:3px;margin:0}p{margin:4px 0;font-size:15px}.b{border:2px dashed #000;padding:10px;border-radius:8px}</style></head>
@@ -760,7 +810,7 @@
   }
   function repairForm(r) {
     let photos = [...(r.photos || [])];
-    const trackUrl = `${location.origin}/#/repairs/${r.code}`;
+    const trackUrl = `${location.origin}${storeUrl(`repairs/${r.code}`)}`;
     const waMsg = (st) => `مرحبا ${r.customer_name}،\nتصليح ${r.code} (${r.brand} ${r.model}): ${RS[st]}.\n${st === 'ready' ? 'جهازك جاهز للاستلام ✅\n' : ''}${st === 'awaiting_approval' ? 'يرجى الموافقة على الكلفة الإضافية من الرابط:\n' : 'تقدر تتابع من هنا:\n'}${trackUrl}`;
     const waLink = (st) => `https://wa.me/${String(r.phone).replace(/\D/g, '').replace(/^0/, '964')}?text=${encodeURIComponent(waMsg(st))}`;
     modal(`تصليح ${esc(r.code)} — ${esc(`${r.brand} ${r.model}`)}`, `
@@ -976,7 +1026,7 @@
       <div class="card panel">${list.length ? `<table class="t"><thead><tr><th>الزبون</th><th>المنتجات</th><th>القيمة</th><th>منذ</th><th></th></tr></thead><tbody>
       ${list.map((x) => {
         const names = x.items.filter((i) => i.available).map((i) => `${i.name_ku}${i.variant_label ? ` (${i.variant_label})` : ''}`);
-        const msg = `مرحبا ${x.name} 👋\nلاحظنا تركت بالسلة: ${names.join('، ')}.\nإذا عندك أي سؤال نحن بالخدمة، وتقدر تكمل طلبك من هنا: ${location.origin}/#/cart`;
+        const msg = `مرحبا ${x.name} 👋\nلاحظنا تركت بالسلة: ${names.join('، ')}.\nإذا عندك أي سؤال نحن بالخدمة، وتقدر تكمل طلبك من هنا: ${location.origin}${storeUrl('cart')}`;
         const wa = `https://wa.me/${String(x.phone).replace(/\D/g, '').replace(/^0/, '964')}?text=${encodeURIComponent(msg)}`;
         return `<tr><td><b>${esc(x.name)}</b><br><a class="num muted" href="tel:${esc(x.phone)}">${esc(x.phone)}</a></td>
           <td class="order-items">${x.items.map((i) => i.available ? `${esc(i.name_ku)}${i.variant_label ? ` (${esc(i.variant_label)})` : ''} × ${i.qty}` : '<s>منتج محذوف</s>').join('<br>')}</td>
@@ -1005,6 +1055,14 @@
         ${profit.map((x) => `<tr><td class="num"><a href="#/expenses?m=${x.month}">${x.month}</a></td><td class="num">${x.orders}</td><td class="num">${fmt(x.sales)}</td><td class="num" style="color:${x.net >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:800">${fmt(x.net)}</td></tr>`).join('')}</table>
         <p class="muted" style="font-size:12px">صافي الربح = مبيعات المنتجات − سعر الشراء − رصيد المحفظة المستخدم − المصاريف. أجور التوصيل غير محسوبة (تروح لشركة التوصيل).</p></div></div>`;
     $('#em').onchange = () => { location.hash = `#/expenses?m=${$('#em').value}`; };
+    c.insertAdjacentHTML('beforeend', `<div class="card panel"><h3>📅 الأرباح لفترة محددة</h3><form class="toolbar" id="prf"><label>من <input class="input" type="date" name="from" required></label><label>إلى <input class="input" type="date" name="to" required></label><button class="sm-btn primary">احسب</button></form><div id="prOut"></div></div>`);
+    $('#prf').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const [x] = await api(`/admin/profit?${new URLSearchParams({ from: e.target.from.value, to: e.target.to.value })}`);
+        $('#prOut').innerHTML = `<table class="t" style="margin-top:10px"><tr><td>الفترة</td><td class="num">${esc(x.month)}</td></tr><tr><td>طلبات</td><td class="num">${x.orders}</td></tr><tr><td>مبيعات المنتجات (مُسلّمة)</td><td class="num">${fmt(x.sales)}</td></tr><tr><td>سعر شراء البضاعة</td><td class="num">${fmt(x.cogs)}</td></tr><tr><td>المصاريف</td><td class="num">${fmt(x.expenses)}</td></tr><tr><td><b>صافي الربح</b></td><td class="num" style="color:${x.net >= 0 ? 'var(--green)' : 'var(--red)'}"><b>${fmt(x.net)}</b> د.ع</td></tr></table>`;
+      } catch (err) { toast(err.message); }
+    };
     c.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!confirm('حذف المصروف؟')) return; await api(`/admin/expenses/${b.dataset.del}`, { method: 'DELETE' }); expenses(); });
     $('#addEx').onclick = () => modal('مصروف جديد', `<form id="exf"><div class="fgrid">
         <div class="field"><label>التاريخ</label><input class="input" type="date" name="date" value="${new Date().toISOString().slice(0, 10)}"></div>
@@ -1207,8 +1265,7 @@
   // ---------- router ----------
   const ROUTES = { reviews, repairs, tradein, dashboard, orders, products, categories, banners, coupons, users, settings, security, carts, expenses, bulk, presets, tags, stock, analytics, staff, faqs };
   async function render() {
-    if (!token) return showLogin();
-    if (!ME) { try { ME = await api('/me'); } catch { return; } if (ME.user.role === 'customer') return showLogin(ERR.forbidden); }
+    if (!ME) { try { ME = await api('/me'); } catch (e) { if (e.code !== 'unauthorized' && e.code !== 'forbidden') showLogin(); return; } if (ME.user.role === 'customer') return showLogin(ERR.forbidden); }
     let key = (location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]) || 'dashboard';
     const item = NAV.flatMap(([, items]) => items).find(([k]) => k === key);
     if (!item || !allowed(item[2])) key = (navItems()[0] || ['security'])[0]; // a page this role may open

@@ -924,3 +924,7 @@ table.specs tr:last-child th, table.specs tr:last-child td { border-bottom: 0; }
 .cm-form .input { flex: 1; min-width: 0; }
 .cm-form .btn { flex: 0 0 auto; }
 .leaflet-container { font-family: inherit; }
+
+/* wishlist heart */
+.wish-btn.on { color: #e11d48; }
+.wish-btn.on svg path { fill: currentColor; }

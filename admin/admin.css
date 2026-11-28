@@ -110,3 +110,14 @@ a.kpi { color: inherit; }
 .rc { padding: 8px 12px; border-radius: 12px; margin-bottom: 6px; }
 .rc.customer { background: #FFF4EC; }
 .rc.staff { background: #F2F4F7; }
+
+/* settings sections, IMEI rows, language picker */
+.set-sec { border-top: 1px solid var(--line, #eee); padding-top: 14px; margin-top: 6px; }
+.set-sec h3 { margin: 0 0 4px; font-size: 16px; }
+.check-inline { display: inline-flex; align-items: center; gap: 6px; margin: 4px 12px 4px 0; font-weight: 600; }
+.imei-row { display: flex; gap: 6px; margin-top: 6px; max-width: 320px; }
+.imei-row .input { flex: 1; min-width: 0; }
+.adm-lang { display: flex; gap: 4px; margin-top: 8px; }
+.adm-lang button { flex: 1; padding: 6px 4px; border-radius: 8px; border: 1px solid var(--line, #ddd); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.adm-lang button.on { background: var(--brand, #f97316); color: #fff; border-color: transparent; }
+html[dir="ltr"] .adm-side { border-left: 0; }

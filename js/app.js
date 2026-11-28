@@ -43,6 +43,7 @@
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
     phone: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.3.2 2.5.57 3.6a1 1 0 0 1-.25 1l-2.2 2.2Z"/></svg>',
     wand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m3 21 12-12M15 4V2M15 10V8M19 6h2M9 6h2M18 3l1-1M18 9l1 1"/></svg>',
+    heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.6-9.2-9.4C1.6 7.6 3.9 4 7.4 4c2 0 3.5 1.1 4.6 2.6C13.1 5.1 14.6 4 16.6 4c3.5 0 5.8 3.6 4.6 7.1-1.7 4.8-9.2 9.4-9.2 9.4Z"/></svg>',
     share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
     help: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 14.5a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5ZM12 6a3.5 3.5 0 0 0-3.5 3.5h2a1.5 1.5 0 1 1 2.2 1.3c-.9.5-1.7 1.3-1.7 2.7v.5h2v-.4c0-.6.3-.9.9-1.3A3.5 3.5 0 0 0 12 6Z"/></svg>',
     swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>',
@@ -67,11 +68,16 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
     del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
   };
+  // Base path of the store (works in a sub-folder) and the language taken from the URL (/ku/, /ar/, /en/).
+  const meta = (n) => { const m = document.querySelector(`meta[name="${n}"]`); return m ? m.content : ''; };
+  const BASE = meta('rp-base') || '/';
+  const LANGS = ['ku', 'ar', 'en'];
+  const urlLang = meta('rp-lang');
   const S = {
-    lang: store.get('lang', null) || detectLang(),
-    langChosen: !!store.get('lang', null),
-    token: store.get('token', null),
+    lang: LANGS.includes(urlLang) ? urlLang : (store.get('lang', null) || detectLang()),
+    langChosen: !!store.get('lang', null) || new URLSearchParams(location.search).has('lang'),
     user: store.get('user', null),
+    wish: store.get('wish', []),
     cart: store.get('cart', []),
     tradein: store.get('tradein', null), // { model_id, answers, estimate, label } // [{id, qty, name_ku, name_ar, name_en, price, image, stock}]
     settings: {},
@@ -95,23 +101,42 @@
   const fmt = (n) => Number(n || 0).toLocaleString('en-US');
   const money = (n) => `<span class="price"><span class="num">${fmt(n)}</span><small>${T('currency')}</small></span>`;
   const safeUrl = (u) => (/^(https?:\/\/|\/|#)/i.test(String(u || '')) ? String(u) : '');
-  const img = (u) => esc(safeUrl(u) || '/img/placeholder.svg');
+  const abs = (u) => (/^\/(uploads|img)\//.test(u) ? BASE + u.slice(1) : u);
+  const img = (u) => esc(abs(safeUrl(u) || '/img/placeholder.svg'));
+  // In-app links: U('cart') → /base/ku/cart . go() navigates without a page reload.
+  const U = (r = '') => `${BASE}${S.lang}/${String(r).replace(/^#?\/?/, '')}`;
+  const pkey = (p) => (p && p.slug ? `${p.id}-${p.slug}` : String(p && p.id));
+  // The current in-app route ("product/12-iphone?x=1"), relative to the base and the language prefix.
+  function here() {
+    let path = location.pathname.startsWith(BASE) ? location.pathname.slice(BASE.length) : location.pathname.replace(/^\//, '');
+    path = path.replace(/^(ku|ar|en)(\/|$)/, '');
+    return decodeURI(path) + location.search;
+  }
+  function go(r, replace) {
+    const url = String(r).startsWith('/') ? r : U(r);
+    if (url !== location.pathname + location.search) history[replace ? 'replaceState' : 'pushState'](null, '', url);
+    route();
+  }
+  const cookie = (n) => { const m = document.cookie.match(new RegExp(`(?:^|; )${n}=([^;]*)`)); return m ? decodeURIComponent(m[1]) : ''; };
+  const csrfHeaders = () => ({ 'X-CSRF-Token': cookie('rp_csrf') || S.settings.csrf || '' });
   const dateFmt = (d) => { try { return new Date(d.replace(' ', 'T') + 'Z').toLocaleDateString(S.lang === 'en' ? 'en-GB' : 'ar-IQ', { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return d; } };
 
   async function api(path, opts = {}) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (S.token) headers.Authorization = `Bearer ${S.token}`;
-    const res = await fetch(`/api${path}`, { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    const method = opts.method || 'GET';
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json', ...(method !== 'GET' ? csrfHeaders() : {}) };
+    const res = await fetch(`${BASE}api${path}`, { method, headers, credentials: 'same-origin', body: opts.body ? JSON.stringify(opts.body) : undefined });
     const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && S.token && path !== '/auth/login') { setAuth(null, null); }
+    if (res.status === 401 && S.user && !path.startsWith('/auth/')) { setAuth(null, null); }
     if (!res.ok) { const e = new Error(data.error || 'generic'); e.code = data.error; e.data = data; throw e; }
     return data;
   }
   const errMsg = (e) => T(`err_${e.code}`) !== `err_${e.code}` ? T(`err_${e.code}`) : T('err_generic');
 
-  function setAuth(token, user) {
-    S.token = token; S.user = user;
-    if (token) { store.set('token', token); store.set('user', user); } else { store.del('token'); store.del('user'); }
+  // The session lives in an HttpOnly cookie; only the profile is kept here to draw the UI.
+  function setAuth(_token, user) {
+    S.user = user;
+    if (user) store.set('user', user); else { store.del('user'); store.del('token'); }
+    if (user) syncWish();
     if (user && user.role !== 'customer') api('/me').then((me) => { S.adminPath = me.admin_path; renderMenu(); }).catch(() => {});
     renderMenu();
   }
@@ -131,8 +156,8 @@
   let syncTimer;
   function saveCart() {
     store.set('cart', S.cart); updateCartBadge();
-    if ($('#tabbar') && $('#tabbar').innerHTML) renderTabbar(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0] || undefined);
-    if (S.token) { clearTimeout(syncTimer); syncTimer = setTimeout(() => api('/cart/sync', { method: 'POST', body: { items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } }).catch(() => {}), 1500); }
+    if ($('#tabbar') && $('#tabbar').innerHTML) renderTabbar(here().split(/[/?]/)[0] || undefined);
+    if (S.user) { clearTimeout(syncTimer); syncTimer = setTimeout(() => api('/cart/sync', { method: 'POST', body: { items: S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty })) } }).catch(() => {}), 1500); }
   }
   function updateCartBadge() {
     const n = cartCount();
@@ -153,7 +178,7 @@
     return true;
   }
   function addToCart(p, qty = 1, variant = null) {
-    if (p.has_variants && !variant) { location.hash = `#/product/${p.id}`; return; }
+    if (p.has_variants && !variant) { go(`product/${p.id}`); return; }
     if (!pushCart(p, qty, variant)) return;
     saveCart();
     if (S.bundle && S.bundle.forId === p.id && S.bundle.items.length) showBundleSheet(S.bundle.items);
@@ -173,9 +198,9 @@
     el.innerHTML = `<div class="grab"></div>
       <div class="sheet-head"><h3><span class="hic" style="background:var(--green-soft);color:var(--green)">${I.check}</span>${T('addedTo')}</h3><button class="close-btn" data-close>${I.close}</button></div>
       <div class="section-title" style="margin-top:0;font-size:16px">${T('boughtTogether')}</div>
-      <div class="bundle-row">${items.map((b) => { productCache.set(b.id, b); return `<div class="bundle-item"><a href="#/product/${b.id}" data-close-nav><img src="${img(b.image)}" alt=""></a>
+      <div class="bundle-row">${items.map((b) => { productCache.set(b.id, b); return `<div class="bundle-item"><a href="${U(`product/${pkey(b)}`)}" data-close-nav><img src="${img(b.image)}" alt=""></a>
         <div class="nm">${esc(L(b, 'name'))}</div><div class="bp">${money(b.price)}</div><button class="add-btn sm" data-add="${b.id}" aria-label="${esc(T('addToCart'))}">${I.plus}</button></div>`; }).join('')}</div>
-      <a class="btn btn-primary" href="#/cart" data-close-nav>${I.basket}${T('viewCart')}</a>
+      <a class="btn btn-primary" href="${U()}cart" data-close-nav>${I.basket}${T('viewCart')}</a>
       <button class="btn btn-soft" data-close>${T('continueShopping')}</button>`;
     openPanel(el);
   }
@@ -189,13 +214,13 @@
     $('#btnMenu').innerHTML = I.menu;
     updateCartBadge();
     $('#desktopNav').innerHTML = `
-      <a href="#/" data-nav="home">${T('home')}</a>
+      <a href="${U()}" data-nav="home">${T('home')}</a>
       <a href="#" data-open-cats>${T('categories')}</a>
-      <a href="#/orders" data-nav="orders">${T('myOrders')}</a>
-      <a href="#/repair" data-nav="repair">${T('repairTitle')}</a>
-      <a href="#/profile" data-nav="profile">${T('profile')}</a>`;
+      <a href="${U()}orders" data-nav="orders">${T('myOrders')}</a>
+      <a href="${U()}repair" data-nav="repair">${T('repairTitle')}</a>
+      <a href="${U()}profile" data-nav="profile">${T('profile')}</a>`;
     const fl = document.querySelector('.footer-links');
-    if (fl) fl.innerHTML = `<a href="#/faq">${T('faq')}</a> · <a href="#/support">${T('support')}</a>`;
+    if (fl) fl.innerHTML = `<a href="${U()}faq">${T('faq')}</a> · <a href="${U()}support">${T('support')}</a>`;
     renderMenu();
   }
 
@@ -209,30 +234,30 @@
 
   function renderMenu() {
     const u = S.user;
-    const route = location.hash.split('/')[1] || '';
+    const route = here().split(/[/?]/)[0] || '';
     const item = (href, icon, cls, label, active, attrs = '') =>
       `<a class="menu-item ${active ? 'active' : ''}" href="${href}" ${attrs}><span class="mi ${cls}">${icon}</span>${label}<span class="chev">${I.chev}</span></a>`;
     const s = S.settings;
     $('#menuDrawer').innerHTML = `
       <div class="drawer-head">
-        <a href="#/" class="logo"><span>${esc(s.store_name || 'Store')}</span><span class="dot"></span></a>
+        <a href="${U()}" class="logo"><span>${esc(s.store_name || 'Store')}</span><span class="dot"></span></a>
         <button class="close-btn" data-close>${I.close}</button>
       </div>
       <div class="drawer-body">
-        ${u ? `<a href="#/profile" class="card menu-user"><span class="avatar">${esc((u.name || '?').charAt(0).toUpperCase())}</span>
+        ${u ? `<a href="${U()}profile" class="card menu-user"><span class="avatar">${esc((u.name || '?').charAt(0).toUpperCase())}</span>
           <span class="info"><b>${esc(u.name)}</b><span class="num">${esc(u.phone)}</span><br><span class="pill">${T('customer')}</span> <span style="color:var(--brand);font-weight:700">${T('profile')}</span></span>
           <span class="chev" style="width:20px;color:var(--muted)">${I.chev}</span></a>`
-        : `<div class="card menu-user"><span class="avatar">?</span><span class="info"><b>${T('welcome')}</b><a class="pill" href="#/quick">${T('login')}</a></span></div>`}
+        : `<div class="card menu-user"><span class="avatar">?</span><span class="info"><b>${T('welcome')}</b><a class="pill" href="${U()}quick">${T('login')}</a></span></div>`}
         <div class="card menu-list">
-          ${item('#/', I.home, `o ${route === '' ? 'solid' : ''}`, T('home'), route === '')}
+          ${item(U(''), I.home, `o ${route === '' ? 'solid' : ''}`, T('home'), route === '')}
           ${item('#', I.list, 'b', T('categories'), false, 'data-open-cats')}
-          ${item('#/cart', I.basket, 'g', T('cart'), route === 'cart')}
-          ${item('#/orders', I.bag, 'p', T('myOrders'), route === 'orders')}
+          ${item(U('cart'), I.basket, 'g', T('cart'), route === 'cart')}
+          ${item(U('orders'), I.bag, 'p', T('myOrders'), route === 'orders')}
           ${item('#', I.search, 'y', T('search'), false, 'data-open-search')}
-          ${item('#/finder', I.spark, 'p', T('finderTitle'), route === 'finder')}
-          ${S.settings.tradein_enabled === '1' ? item('#/tradein', I.swap, 'g', T('tiTitle'), route === 'tradein') : ''}
-          ${S.settings.repair_enabled === '1' ? item('#/repair', I.wrench, 'o', T('repairTitle'), route === 'repair' || route === 'repairs') : ''}
-          ${item('#/faq', I.help, 'b', T('faq'), route === 'faq')}
+          ${item(U('finder'), I.spark, 'p', T('finderTitle'), route === 'finder')}
+          ${S.settings.tradein_enabled === '1' ? item(U('tradein'), I.swap, 'g', T('tiTitle'), route === 'tradein') : ''}
+          ${S.settings.repair_enabled === '1' ? item(U('repair'), I.wrench, 'o', T('repairTitle'), route === 'repair' || route === 'repairs') : ''}
+          ${item(U('faq'), I.help, 'b', T('faq'), route === 'faq')}
           ${u && u.role && u.role !== 'customer' ? item(esc(S.adminPath || '/admin'), I.admin, 'r', T('adminPanel'), false) : ''}
         </div>
         <div class="card lang-box">
@@ -268,7 +293,7 @@
     $('#searchForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const q = $('#searchInput').value.trim();
-      if (q) { closePanels(); location.hash = `#/search/${encodeURIComponent(q)}`; }
+      if (q) { closePanels(); go(`search/${encodeURIComponent(q)}`); }
     });
   }
   function openSearch() { renderSearchSheet(); openPanel($('#searchSheet')); setTimeout(() => $('#searchInput').focus(), 250); }
@@ -282,15 +307,68 @@
       <div class="cat-layout">
         <div class="cat-side">${cats.map((c) => `<button data-cat-side="${c.id}" class="${c.id === sel.id ? 'active' : ''}"><div class="img"><img src="${img(c.image)}" alt=""></div>${esc(L(c, 'name'))}</button>`).join('')}</div>
         <div class="cat-main">
-          <a class="sub-item all" href="#/category/${sel.id}" data-close-nav>${esc(T('allOf', { x: L(sel, 'name') }))}<span>${I.arrow}</span></a>
-          ${sel.children.map((s) => `<a class="sub-item" href="#/category/${s.id}" data-close-nav>${esc(L(s, 'name'))}<span class="cnt num">${s.count}</span><span>${I.chev}</span></a>`).join('')}
+          <a class="sub-item all" href="${U()}category/${sel.id}" data-close-nav>${esc(T('allOf', { x: L(sel, 'name') }))}<span>${I.arrow}</span></a>
+          ${sel.children.map((s) => `<a class="sub-item" href="${U()}category/${s.id}" data-close-nav>${esc(L(s, 'name'))}<span class="cnt num">${s.count}</span><span>${I.chev}</span></a>`).join('')}
         </div>
       </div>`;
   }
   function openCats() { renderCatDrawer(); openPanel($('#catDrawer')); }
 
+  // In-app links (/base/ku/...) open without reloading the page; everything else (admin, print, files) loads normally.
+  const APP_PATH = new RegExp(`^${BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(ku|ar|en)(/|$)`);
   document.addEventListener('click', (e) => {
-    if (e.target.closest('[data-back]')) { if (history.length > 1) history.back(); else location.hash = '#/'; return; }
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest('a[href]'); if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+    const href = a.getAttribute('href');
+    if (href.startsWith('#/')) { e.preventDefault(); closePanels(); go(href.slice(2)); return; }
+    if (href === '#' || href.startsWith('#')) return;
+    let u; try { u = new URL(a.href, location.href); } catch { return; }
+    if (u.origin !== location.origin) return;
+    const m = u.pathname.match(APP_PATH); if (!m) return;
+    e.preventDefault();
+    if (m[1] !== S.lang) { S.lang = m[1]; store.set('lang', S.lang); applyLang(); }
+    closePanels();
+    if (u.pathname + u.search !== location.pathname + location.search) history.pushState(null, '', u.pathname + u.search);
+    route();
+  });
+  // Footer language links and <html lang> follow the page the visitor is on.
+  function syncLangLinks() {
+    const r = here();
+    document.querySelectorAll('.footer-langs a[hreflang]').forEach((a) => {
+      const l = a.hreflang === 'ckb' ? 'ku' : a.hreflang;
+      a.href = `${BASE}${l}/${r}`;
+    });
+  }
+
+  // ---------------- wishlist (kept on the phone, synced to the account after sign-in) ----------------
+  function saveWish(ids) { S.wish = [...new Set((ids || []).map(Number).filter(Boolean))]; store.set('wish', S.wish); }
+  function syncWish() {
+    if (!S.user) return;
+    api('/me/wishlist', { method: 'POST', body: { ids: S.wish } }).then((r) => saveWish(r.ids)).catch(() => {});
+  }
+  async function toggleWish(id, btn) {
+    const on = !S.wish.includes(id);
+    saveWish(on ? [...S.wish, id] : S.wish.filter((x) => x !== id));
+    if (btn) { btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', String(on)); const sp = btn.querySelector('span'); if (sp) sp.textContent = T(on ? 'wishSaved' : 'wishAdd'); }
+    toast(T(on ? 'wishSaved' : 'wishRemoved'));
+    if (S.user) { try { const r = await api(`/me/wishlist/${id}`, { method: on ? 'PUT' : 'DELETE' }); saveWish(r.ids); } catch { /* kept locally */ } }
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-wish]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation(); toggleWish(Number(b.dataset.wish), b);
+  });
+  async function viewWishlist() {
+    app.innerHTML = `${pageHead(T('wishlist'))}<div class="container"><div id="grid"><div class="grid">${'<div class="p-card skel"></div>'.repeat(4)}</div></div></div>`;
+    if (!S.wish.length) { $('#grid').innerHTML = `<div class="empty"><div class="ic sq">${I.heart}</div><h3>${T('wishEmpty')}</h3><p>${T('wishEmptySub')}</p><a class="btn btn-primary" href="${U()}">${T('shopNow')}</a></div>`; return; }
+    const list = await Promise.all(S.wish.slice(0, 60).map((id) => api(`/products/${id}`).then((d) => d.product).catch(() => null)));
+    const items = list.filter(Boolean);
+    if (items.length !== S.wish.length) saveWish(items.map((x) => x.id));
+    if (!$('#grid')) return;
+    $('#grid').innerHTML = items.length ? `<div class="grid">${items.map(productCard).join('')}</div>` : `<div class="empty"><h3>${T('wishEmpty')}</h3></div>`;
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-back]')) { if (history.length > 1) history.back(); else go(''); return; }
     const t = e.target.closest('[data-close],[data-close-nav],[data-open-cats],[data-open-search],[data-lang],[data-logout],[data-cat-side],[data-q],[data-add]');
     if (!t) return;
     if (t.matches('[data-close]')) { e.preventDefault(); closePanels(); }
@@ -298,13 +376,13 @@
     else if (t.matches('[data-open-cats]')) { e.preventDefault(); openCats(); }
     else if (t.matches('[data-open-search]')) { e.preventDefault(); openSearch(); }
     else if (t.matches('[data-lang]')) {
-      S.lang = t.dataset.lang; store.set('lang', S.lang); applyLang(); route();
+      S.lang = t.dataset.lang; store.set('lang', S.lang); applyLang(); history.replaceState(null, '', U(here())); route();
       setTimeout(() => openPanel($('#menuDrawer')), 0);
     } else if (t.matches('[data-logout]')) {
       api('/auth/logout', { method: 'POST' }).catch(() => {});
-      setAuth(null, null); closePanels(); location.hash = '#/';
+      setAuth(null, null); closePanels(); go('');
     } else if (t.matches('[data-cat-side]')) { renderCatDrawer(Number(t.dataset.catSide)); }
-    else if (t.matches('[data-q]')) { closePanels(); location.hash = `#/search/${encodeURIComponent(t.dataset.q)}`; }
+    else if (t.matches('[data-q]')) { closePanels(); go(`search/${encodeURIComponent(t.dataset.q)}`); }
     else if (t.matches('[data-add]')) {
       e.preventDefault(); e.stopPropagation();
       const p = productCache.get(Number(t.dataset.add));
@@ -350,7 +428,7 @@
     const a = p.attrs || {};
     const spec = a.os ? [a.storage ? `${a.storage >= 1024 ? `${a.storage / 1024}TB` : `${a.storage}GB`}` : '', a.ram ? `${a.ram}GB RAM` : '', a.camera ? `${a.camera}MP` : ''].filter(Boolean).join(' · ') : '';
     return `
-      <a class="p-card ${out ? 'soldout' : ''}" href="#/product/${p.id}">
+      <a class="p-card ${out ? 'soldout' : ''}" href="${U(`product/${pkey(p)}`)}">
         <div class="img">
           ${badge ? `<div class="tags-stack start">${badge}</div>` : ''}
           <img src="${img(p.image)}" alt="${esc(L(p, 'name'))}" loading="lazy" decoding="async">
@@ -378,8 +456,8 @@
     const cats = S.categories;
     app.innerHTML = `
       <div class="cat-strip-wrap"><div class="container" style="padding:0"><div class="cat-strip">
-        <a class="cat-chip active" href="#/"><div class="img">${I.shapes}</div>${T('all')}</a>
-        ${cats.map((c) => `<a class="cat-chip" href="#/category/${c.id}"><div class="img"><img src="${img(c.image)}" alt=""></div>${esc(L(c, 'name'))}</a>`).join('')}
+        <a class="cat-chip active" href="${U()}"><div class="img">${I.shapes}</div>${T('all')}</a>
+        ${cats.map((c) => `<a class="cat-chip" href="${U()}category/${c.id}"><div class="img"><img src="${img(c.image)}" alt=""></div>${esc(L(c, 'name'))}</a>`).join('')}
       </div></div></div>
       <div class="container">
         <div id="slider"></div>
@@ -394,13 +472,13 @@
             <span class="ra-tag">${I.wrench}${T('repairTitle')}</span>
             <div class="ra-hooks" aria-live="polite">${[1, 2, 3, 4, 5].map((n, i) => `<div class="ra-hook ${i === 0 ? 'on' : ''}" data-hook="${n}"><b>${T(`hk${n}q`)}</b><span>${T(`hk${n}a`)}</span></div>`).join('')}</div>
             <div class="ra-dots">${[0, 1, 2, 3, 4].map((i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
-            <div class="ra-row"><div class="ra-from" id="raFrom"></div><a class="btn btn-primary ra-cta" href="#/repair?start=1">${T('repairHomeCta')}</a></div>
+            <div class="ra-row"><div class="ra-from" id="raFrom"></div><a class="btn btn-primary ra-cta" href="${U()}repair?start=1">${T('repairHomeCta')}</a></div>
             <div class="ra-chips"><span>${I.shield}${T('chipWarranty')}</span><span>${I.swap}${T('chipOld')}</span><span id="raFree" hidden>${I.check}${T('chipPrice')}</span><span id="raPick" hidden>${I.truck}${T('chipPickup')}</span></div>
           </div>
         </section>` : ''}
         <div class="promo-tiles">
-          <a class="promo-tile finder" href="#/finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b></a>
-          ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="#/tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b></a>` : ''}
+          <a class="promo-tile finder" href="${U()}finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b></a>
+          ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="${U()}tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b></a>` : ''}
         </div>
 
         <div id="flash"></div>
@@ -513,11 +591,12 @@
           <div class="f-chips">${buckets.map((r) => `<button type="button" class="chip num ${Number(cur.min_price || 0) === r[0] && Number(cur.max_price || 0) === r[1] ? 'active' : ''}" data-fp="${r[0]}-${r[1]}">${lbl(r)}</button>`).join('')}</div>
           <div class="f-range"><input class="input num" type="number" inputmode="numeric" min="0" id="fMin" placeholder="${esc(T('fMin'))}" value="${esc(cur.min_price || '')}"><span>—</span><input class="input num" type="number" inputmode="numeric" min="0" id="fMax" placeholder="${esc(T('fMax'))}" value="${esc(cur.max_price || '')}"></div>
           ${f.storages.length > 1 ? `<div class="f-lbl">${T('fStorage')}</div><div class="f-chips">${f.storages.map((x) => `<button type="button" class="chip num ${String(cur.storage) === String(x.v) ? 'active' : ''}" data-fs="${esc(x.v)}">${Number(x.v) >= 1024 ? `${Number(x.v) / 1024}TB` : `${esc(x.v)}GB`}</button>`).join('')}</div>` : ''}
+          ${(f.rams || []).length > 1 ? `<div class="f-lbl">${T('fRam')}</div><div class="f-chips">${f.rams.map((x) => `<button type="button" class="chip num ${String(cur.ram) === String(x.v) ? 'active' : ''}" data-fr="${esc(x.v)}">${esc(x.v)}GB</button>`).join('')}</div>` : ''}
           <label class="check ${cur.in_stock ? 'on' : ''}" id="fStockLbl"><input type="checkbox" id="fStock" ${cur.in_stock ? 'checked' : ''}> ${T('fInStock')}</label>
         </div>
         <div class="f-foot"><button type="button" class="btn btn-soft" id="fClear">${T('fClear')}</button><button type="button" class="btn btn-primary" id="fApply">${T('fApply')}</button></div>`);
       el.onclick = (e) => {
-        const b = e.target.closest('[data-fb],[data-fp],[data-fs]'); if (!b) return;
+        const b = e.target.closest('[data-fb],[data-fp],[data-fs],[data-fr]'); if (!b) return;
         if (b.dataset.fb) b.classList.toggle('active');
         if (b.dataset.fp) {
           const on = !b.classList.contains('active');
@@ -526,7 +605,7 @@
           const [a, z] = b.dataset.fp.split('-').map(Number);
           $('#fMin').value = on && a ? a : ''; $('#fMax').value = on && z ? z : '';
         }
-        if (b.dataset.fs) { const on = !b.classList.contains('active'); el.querySelectorAll('[data-fs]').forEach((x) => x.classList.remove('active')); b.classList.toggle('active', on); }
+        for (const k of ['fs', 'fr']) if (b.dataset[k]) { const on = !b.classList.contains('active'); el.querySelectorAll(`[data-${k}]`).forEach((x) => x.classList.remove('active')); b.classList.toggle('active', on); }
       };
       $('#fStock').onchange = (e) => $('#fStockLbl').classList.toggle('on', e.target.checked);
       $('#fClear').onclick = () => { S.filters = {}; drawFilterCount(); closePanels(); run(); };
@@ -538,6 +617,7 @@
         if (mn > 0) nf.min_price = mn;
         if (mx > 0) nf.max_price = mx;
         const st = el.querySelector('[data-fs].active'); if (st) nf.storage = st.dataset.fs;
+        const rm = el.querySelector('[data-fr].active'); if (rm) nf.ram = rm.dataset.fr;
         if ($('#fStock').checked) nf.in_stock = '1';
         S.filters = nf; drawFilterCount(); closePanels(); run();
       };
@@ -549,7 +629,7 @@
     clearInterval(sliderTimer);
     const el = $('#slider'); if (!el || !banners.length) return;
     el.innerHTML = `<div class="slider">${banners.map((b, i) => `
-      <a class="slide ${i === 0 ? 'active' : ''}" href="${esc(safeUrl(b.link) || '#/')}">
+      <a class="slide ${i === 0 ? 'active' : ''}" href="${esc(safeUrl(b.link) || U(''))}">
         <img src="${img(b.image)}" alt="">
         ${L(b, 'title') ? `<div class="caption">${L(b, 'tag') ? `<span class="tag" style="position:static">${esc(L(b, 'tag'))}</span>` : ''}<h3>${esc(L(b, 'title'))}</h3><p>${esc(L(b, 'subtitle'))}</p></div>` : ''}
       </a>`).join('')}
@@ -575,7 +655,7 @@
     el.innerHTML = `<div class="card flash">
       <div class="flash-head"><h2>${I.bolt}${T('flashSale')}</h2><div class="countdown">${T('timeLeft')} <span class="t" id="cd"></span></div></div>
       <div class="flash-row">${list.map((p) => { productCache.set(p.id, p); return `
-        <a class="flash-item" href="#/product/${p.id}">
+        <a class="flash-item" href="${U(`product/${pkey(p)}`)}">
           <div class="img"><img src="${img(p.image)}" alt="" loading="lazy">${p.stock > 0 && p.stock <= 10 ? `<div class="bar">${T('lowStock')}</div>` : p.stock <= 0 ? `<div class="bar">${T('soldOut')}</div>` : ''}</div>
           <div class="nm">${esc(L(p, 'name'))}</div><div class="pr">${money(p.price)}</div>
         </a>`; }).join('')}</div></div>`;
@@ -596,7 +676,7 @@
     const list = await api(`/products?ids=${ids.join(',')}&limit=10`).catch(() => []);
     if (!list.length || !document.body.contains(el)) return;
     el.innerHTML = `<div class="section-title">${T('seenBefore')}</div><div class="mini-row">${list.map((p) => { productCache.set(p.id, p); return `
-      <a class="mini-item" href="#/product/${p.id}"><img src="${img(p.image)}" alt="" loading="lazy"><div class="nm">${bidiName(L(p, 'name'))}</div>${money(p.price)}</a>`; }).join('')}</div>`;
+      <a class="mini-item" href="${U(`product/${pkey(p)}`)}"><img src="${img(p.image)}" alt="" loading="lazy"><div class="nm">${bidiName(L(p, 'name'))}</div>${money(p.price)}</a>`; }).join('')}</div>`;
   }
 
   function findCat(id) {
@@ -610,8 +690,8 @@
     app.innerHTML = `${pageHead(esc(f ? L(f.cat, 'name') : T('categories')))}
       <div class="container">
         ${top && top.children.length ? `<div class="tabs">
-          <a href="#/category/${top.id}"><button class="${top.id === id ? 'active' : ''}">${T('all')}</button></a>
-          ${top.children.map((s) => `<a href="#/category/${s.id}"><button class="${s.id === id ? 'active' : ''}">${esc(L(s, 'name'))}</button></a>`).join('')}
+          <a href="${U()}category/${top.id}"><button class="${top.id === id ? 'active' : ''}">${T('all')}</button></a>
+          ${top.children.map((s) => `<a href="${U()}category/${s.id}"><button class="${s.id === id ? 'active' : ''}">${esc(L(s, 'name'))}</button></a>`).join('')}
         </div>` : '<div style="height:16px"></div>'}
         ${filterRow()}
         <div id="grid">${gridSkeleton()}</div>
@@ -628,7 +708,7 @@
   async function viewProduct(id) {
     app.innerHTML = '<div class="spinner"></div>';
     let data;
-    try { data = await api(`/products/${id}`); } catch { app.innerHTML = `<div class="empty"><h3>${T('noResults')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
+    try { data = await api(`/products/${id}`); } catch { app.innerHTML = `<div class="empty"><h3>${T('noResults')}</h3><a class="btn btn-primary" href="${U()}">${T('backToShop')}</a></div>`; return; }
     const p = data.product; productCache.set(p.id, p);
     store.set('seen', [p.id, ...store.get('seen', []).filter((x) => x !== p.id)].slice(0, 12));
     const isPhone = !!(p.attrs && p.attrs.os);
@@ -658,7 +738,6 @@
             <h1>${bidiName(L(p, 'name'))}</h1>
             ${p.rating_count ? `<button class="pd-rate" id="jumpRev">${stars(p.rating_avg)}<b class="num">${Number(p.rating_avg).toFixed(1)}</b><span>${esc(T('reviewsN', { x: p.rating_count }))}</span></button>` : ''}
             <div class="prices" id="pdPrice"></div>
-            <div class="usd-approx" id="pdUsd"></div>
             <div class="deliv-line">${I.truck}<span>${T('deliveryLine')}${Number(S.settings.free_delivery_over) ? ` · ${esc(T('freeOverLine', { x: `${fmt(S.settings.free_delivery_over)} ${T('currency')}` }))}` : ''}</span></div>
             ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${[...variants].sort((a, b) => b.price - a.price).map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}<small class="num">${fmt(v.price)}</small></button>`).join('')}</div>` : ''}
             <div class="stock" id="pdStock"></div>
@@ -671,8 +750,8 @@
             </div>
             ${Number(S.settings.exchange_days) > 0 ? `<div class="xchg-note">${I.check}<span>${esc(T('exchangeNote', { x: S.settings.exchange_days }))}</span></div>` : ''}
             <a class="btn btn-wa btn-block hidden" id="askStock" target="_blank" rel="noopener">${I.whatsapp}${T('askStock')}</a>
-            ${p.attrs && p.attrs.os && S.settings.tradein_enabled === '1' ? `<a class="ti-hint" href="#/tradein">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}
-            <div class="pd-minis"><button class="share-mini" id="shareBtn" aria-label="${esc(T('share'))}">${I.share}${T('share')}</button>
+            ${p.attrs && p.attrs.os && S.settings.tradein_enabled === '1' ? `<a class="ti-hint" href="${U()}tradein">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}
+            <div class="pd-minis"><button class="share-mini wish-btn ${S.wish.includes(p.id) ? 'on' : ''}" id="wishBtn" data-wish="${p.id}" aria-pressed="${S.wish.includes(p.id)}">${I.heart}<span>${T(S.wish.includes(p.id) ? 'wishSaved' : 'wishAdd')}</span></button><button class="share-mini" id="shareBtn" aria-label="${esc(T('share'))}">${I.share}${T('share')}</button>
               ${isPhone ? `<button class="share-mini" id="cmpBtn">${I.scale}${T('compareWith')}</button>` : ''}</div>
             ${trustStrip()}
             <div class="cashback-note hidden" id="pdCashback"></div>
@@ -694,12 +773,10 @@
     S.bundle = { forId: p.id, items: data.bundle || [] };
     const render = () => {
       const curPrice = variant ? variant.price : p.price;
-      const rate = Number(S.settings.usd_rate) || 0;
-      $('#pdUsd').textContent = S.settings.price_display === 'both' && rate ? `≈ $${fmt(Math.round(curPrice / rate))}` : '';
       const cbPct = Number(S.settings.cashback_percent) || 0;
       $('#pdCashback').classList.toggle('hidden', !cbPct);
       if (cbPct) $('#pdCashback').innerHTML = `${I.gift}<span>${esc(T('cashbackNote', { x: `${fmt(Math.floor((curPrice * cbPct) / 100))} ${T('currency')}` }))}</span>`;
-      S.waContext = `${L(p, 'name')}${variant ? ` (${variant.label})` : ''} — ${location.origin}/p/${p.id}`;
+      S.waContext = `${L(p, 'name')}${variant ? ` (${variant.label})` : ''} — ${location.origin}${BASE}p/${p.id}`;
       renderWhatsApp();
       const price = variant ? variant.price : p.price;
       const old = variant ? variant.old_price : p.old_price;
@@ -740,11 +817,11 @@
       $('#bxAdd').onclick = () => {
         if (!pushCart(p, 1, variant)) return;
         bundleItems.forEach((b) => { const c = app.querySelector(`[data-bx="${b.id}"]`); if (c && c.checked) pushCart(b, 1, null); });
-        saveCart(); toast(T('bundleAdded')); location.hash = '#/cart';
+        saveCart(); toast(T('bundleAdded')); go(U('cart'));
       };
     }
     if ($('#jumpRev')) $('#jumpRev').onclick = () => { const r = $('#reviewsSec'); if (r) r.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-    if ($('#cmpBtn')) $('#cmpBtn').onclick = () => pickPhone([p.id], (id) => { location.hash = `#/compare?ids=${p.id},${id}`; });
+    if ($('#cmpBtn')) $('#cmpBtn').onclick = () => pickPhone([p.id], (id) => { go(`compare?ids=${p.id},${id}`); });
     loadReviews(p);
     app.querySelectorAll('[data-variant]').forEach((b) => b.addEventListener('click', () => { variant = variants.find((v) => v.id === Number(b.dataset.variant)); qty = 1; render(); }));
     const sw = $('#swipe');
@@ -761,7 +838,7 @@
     $('#qPlus').onclick = () => { qty = Math.min(variant ? variant.stock : p.stock, qty + 1); $('#qVal').textContent = qty; };
     $('#addBtn').onclick = () => addToCart(p, qty, variant);
     $('#shareBtn').onclick = async () => {
-      const url = `${location.origin}/p/${p.id}`;
+      const url = `${location.origin}${BASE}p/${p.id}`;
       const text = `${L(p, 'name')} — ${fmt(variant ? variant.price : p.price)} ${T('currency')}`;
       if (navigator.share) { try { await navigator.share({ title: L(p, 'name'), text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
       window.open(`https://wa.me/?text=${encodeURIComponent(`${text}\n${url}`)}`, '_blank', 'noopener');
@@ -785,7 +862,7 @@
     if (r.can_review === 'off') { el.remove(); return; }
     let offset = r.list.length;
     const write = r.can_review === 'yes' ? `<button class="btn btn-soft rv-write" id="rvWrite">${I.star}${T(r.mine ? 'editReview' : 'writeReview')}</button>`
-      : r.can_review === 'login' ? `<a class="btn btn-soft rv-write" href="#/quick?next=${encodeURIComponent(`product/${p.id}`)}">${T('reviewLogin')}</a>` : '';
+      : r.can_review === 'login' ? `<a class="btn btn-soft rv-write" href="${U()}quick?next=${encodeURIComponent(`product/${p.id}`)}">${T('reviewLogin')}</a>` : '';
     el.innerHTML = `<div class="rv-head"><h2>${T('reviewsT')}</h2>${write}</div>
       ${r.count ? `<div class="rv-sum"><div class="rv-avg"><b class="num">${r.avg.toFixed(1)}</b>${stars(r.avg)}<small>${esc(T('reviewsN', { x: r.count }))}</small></div>
         <div class="rv-dist">${[5, 4, 3, 2, 1].map((n) => `<div><span class="num">${n}</span>${I.star}<i><b style="width:${(r.dist[n] / r.count) * 100}%"></b></i><span class="num">${r.dist[n]}</span></div>`).join('')}</div></div>
@@ -823,7 +900,7 @@
         const fd = new FormData(); fd.append('file', file);
         $('#rvUp').classList.add('busy');
         try {
-          const res = await fetch('/api/reviews/upload', { method: 'POST', headers: { Authorization: `Bearer ${S.token}` }, body: fd });
+          const res = await fetch(`${BASE}api/reviews/upload`, { method: 'POST', headers: csrfHeaders(), credentials: 'same-origin', body: fd });
           const d = await res.json().catch(() => ({}));
           if (!res.ok) toast(errMsg({ code: d.error })); else photos.push(d.url);
         } catch { toast(T('err_generic')); }
@@ -858,7 +935,7 @@
     const ids = String(idsParam || '').split(',').map(Number).filter((x) => x > 0).slice(0, 3);
     app.innerHTML = '<div class="spinner"></div>';
     const prods = (await Promise.all(ids.map((id) => api(`/products/${id}`).then((d) => d.product).catch(() => null)))).filter(Boolean);
-    if (!prods.length) { location.hash = '#/'; return; }
+    if (!prods.length) { go(''); return; }
     prods.forEach((x) => productCache.set(x.id, x));
     const a = (x, k) => Number((x.attrs || {})[k]) || 0;
     const gb = (n) => (n >= 1024 ? `${n / 1024}TB` : `${n}GB`);
@@ -877,7 +954,7 @@
     app.innerHTML = `${pageHead(T('compareTitle'))}
       <div class="container"><div class="card cmp" style="--n:${prods.length}">
         <div class="cmp-cols">${prods.map((x, i) => `<div class="cmp-col">
-          <a href="#/product/${x.id}"><img src="${img(x.image)}" alt=""></a>
+          <a href="${U(`product/${pkey(x)}`)}"><img src="${img(x.image)}" alt=""></a>
           <b class="cmp-nm">${bidiName(L(x, 'name'))}</b>${money(x.price)}
           <button class="add-btn cmp-add" data-add="${x.id}" ${x.stock <= 0 ? 'disabled' : ''} aria-label="${esc(T('addToCart'))}">${I.plus}</button>
           <button class="share-mini" data-chg="${i}">${I.scale}${T('changeBtn')}</button></div>`).join('')}</div>
@@ -889,7 +966,7 @@
       </div></div>`;
     app.querySelectorAll('[data-chg]').forEach((b) => b.onclick = () => {
       const i = Number(b.dataset.chg);
-      pickPhone(prods.map((x) => x.id), (id) => { const nids = prods.map((x) => x.id); nids[i] = id; location.hash = `#/compare?ids=${nids.join(',')}`; });
+      pickPhone(prods.map((x) => x.id), (id) => { const nids = prods.map((x) => x.id); nids[i] = id; go(`compare?ids=${nids.join(',')}`); });
     });
   }
 
@@ -926,7 +1003,7 @@
     const n = cartCount();
     if (!n) {
       app.innerHTML = `${pageHead(T('cartTitle'), `<span class="pill num">${n} ${T('pcs')}</span>`)}
-        <div class="empty"><div class="ic">${I.basket}</div><h3>${T('cartEmpty')}</h3><p>${T('cartEmptySub')}</p><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`;
+        <div class="empty"><div class="ic">${I.basket}</div><h3>${T('cartEmpty')}</h3><p>${T('cartEmptySub')}</p><a class="btn btn-primary" href="${U()}">${T('backToShop')}</a></div>`;
       return;
     }
     const bOff = Math.min(S.bundleOff || 0, cartTotal());
@@ -939,7 +1016,7 @@
       <div class="container cart-layout">
         <div>${S.cart.map((i) => `
           <div class="card cart-item">
-            <a href="#/product/${i.id}"><img src="${img(i.image)}" alt=""></a>
+            <a href="${U(`product/${i.id}`)}"><img src="${img(i.image)}" alt=""></a>
             <div class="info"><div class="nm">${esc(L(i, 'name'))}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}${money(i.price)}</div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
               <button class="rm-btn" data-rm="${esc(cartKey(i))}" aria-label="${esc(T('delete'))}">${I.trash}</button>
@@ -954,7 +1031,7 @@
           ${S.tradein ? `<div class="sum-row"><span>${T('tiCredit')}</span><b class="num" style="color:var(--green)">-${fmt(Math.min(S.tradein.estimate, sub))}</b></div>` : ''}
           <div class="sum-row"><span>${T('delivery')}</span>${isFree || !minFee ? `<b style="color:var(--green)">${T('free')}</b>` : `<span>${fees.length > 1 && new Set(fees).size > 1 ? `<small style="color:var(--ink-2)">${T('from')}</small> ` : ''}${money(minFee)}</span>`}</div>
           <div class="sum-row total"><span>${T('total')}</span>${money(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))}</div>
-          <a class="btn btn-primary btn-block checkout-btn" href="#/checkout">${esc(T('checkoutWith', { x: `${fmt(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))} ${T('currency')}` }))}</a>
+          <a class="btn btn-primary btn-block checkout-btn" href="${U()}checkout">${esc(T('checkoutWith', { x: `${fmt(sub - (S.tradein ? Math.min(S.tradein.estimate, sub) : 0) + (isFree ? 0 : minFee))} ${T('currency')}` }))}</a>
           <p class="checkout-trust">${I.shield}<span>${esc(T('checkoutTrust', { x: S.settings.exchange_days || 3 }))}</span></p>
         </div>
       </div>`;
@@ -968,24 +1045,24 @@
       if (b.dataset.rm) S.cart = S.cart.filter((x) => cartKey(x) !== key);
       saveCart(); viewCart(true);
       // the bundle deal depends on what is in the cart → ask the server again
-      if (S.cart.length) refreshCart().then(() => { if (location.hash.startsWith('#/cart')) viewCart(true); }); else S.bundleOff = 0;
+      if (S.cart.length) refreshCart().then(() => { if (here().startsWith('cart')) viewCart(true); }); else S.bundleOff = 0;
     };
   }
 
   function tradeinBox(sub) {
     if (S.settings.tradein_enabled !== '1') return '';
     if (!S.tradein && !S.cart.some((i) => i.is_phone)) return '';
-    if (!S.tradein) return `<a class="ti-banner" href="#/tradein?from=cart">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>`;
+    if (!S.tradein) return `<a class="ti-banner" href="${U()}tradein?from=cart">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>`;
     return `<div class="ti-applied">${I.swap}<div><b>${esc(S.tradein.label)}</b><small>${T('tiNote')}</small></div><button data-ti-remove aria-label="${esc(T('delete'))}">${I.close}</button></div>`;
   }
 
   async function viewCheckout() {
-    if (!S.user) { location.hash = '#/quick?next=checkout'; return; }
-    if (!cartCount()) { location.hash = '#/cart'; return; }
+    if (!S.user) { go(U('quick?next=checkout')); return; }
+    if (!cartCount()) { go(U('cart')); return; }
     app.innerHTML = '<div class="spinner"></div>';
     const [me, addresses] = await Promise.all([api('/me').catch(() => null), api('/me/addresses').catch(() => []), refreshCart()]);
-    if (!me) { location.hash = '#/quick?next=checkout'; return; }
-    if (!cartCount()) { location.hash = '#/cart'; return; }
+    if (!me) { go(U('quick?next=checkout')); return; }
+    if (!cartCount()) { go(U('cart')); return; }
     const user = me.user;
     const def = addresses[0] || {};
     const zs = zones();
@@ -1088,7 +1165,7 @@
         app.innerHTML = `<div class="empty"><div class="ic" style="background:var(--green-soft);color:var(--green)">${I.check}</div>
           <h3>${T('orderPlaced')}</h3><p>${T('orderPlacedSub')}</p>
           <p><b>${esc(T('orderNo', { x: order.id }))}</b></p>
-          <a class="btn btn-primary" href="#/order/${order.id}">${T('myOrders')}</a></div>`;
+          <a class="btn btn-primary" href="${U()}order/${order.id}">${T('myOrders')}</a></div>`;
       } catch (e) {
         btn.disabled = false;
         if (e.code && e.code.startsWith('coupon_')) { coupon = null; drawCoupon(); recalc(); }
@@ -1107,7 +1184,7 @@
       <div id="qErr"></div>
       <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" required placeholder="07xx xxx xxxx" autocomplete="tel" style="text-align:start"></div>
       <button class="btn btn-primary btn-block" type="submit">${T('sendCode')}</button>
-      <div class="switch-link"><a href="#/login${nextQ}">${T('loginWithPassword')}</a></div>
+      <div class="switch-link"><a href="${U()}login${nextQ}">${T('loginWithPassword')}</a></div>
     </form></div>`;
     $('#qForm').onsubmit = async (e) => {
       e.preventDefault();
@@ -1118,7 +1195,7 @@
         viewQuickCode(phone, sent, next);
       } catch (err) {
         btn.disabled = false;
-        if (err.code === 'use_password') { location.hash = `#/login${nextQ}`; return; }
+        if (err.code === 'use_password') { go(`login${nextQ}`); return; }
         $('#qErr').innerHTML = errHtml(err);
       }
     };
@@ -1150,7 +1227,7 @@
       try {
         const r = await api('/auth/quick', { method: 'POST', body });
         setAuth(r.token, r.user); store.del('ref');
-        location.hash = next ? `#/${next}` : '#/profile';
+        go(next ? `${next}` : U('profile'));
       } catch (err) { btn.disabled = false; $('#qcErr').innerHTML = errHtml(err); }
     };
   }
@@ -1191,11 +1268,11 @@
       <div class="field"><label>${T('phone')}</label><input class="input num" name="phone" type="tel" required placeholder="07xx xxx xxxx" autocomplete="tel" style="text-align:start"></div>
       ${reset ? '' : `<div class="field"><label>${T('password')}</label><input class="input" name="password" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}"></div>`}
       ${reg ? `<div class="field"><label>${T('referralOpt')}</label><input class="input num" name="referral" style="text-transform:uppercase;text-align:start" value="${esc(store.get('ref', '') || '')}"></div>` : ''}
-      ${mode === 'login' ? `<div style="display:flex;justify-content:space-between;margin:-4px 0 14px;font-size:14px;font-weight:700"><a href="#/quick${nextQ}" style="color:var(--brand)">${T('loginWithCode')}</a><a href="#/reset${nextQ}" style="color:var(--ink-2)">${T('forgotPassword')}</a></div>` : ''}
+      ${mode === 'login' ? `<div style="display:flex;justify-content:space-between;margin:-4px 0 14px;font-size:14px;font-weight:700"><a href="${U()}quick${nextQ}" style="color:var(--brand)">${T('loginWithCode')}</a><a href="${U()}reset${nextQ}" style="color:var(--ink-2)">${T('forgotPassword')}</a></div>` : ''}
       <button class="btn btn-primary btn-block" type="submit">${reg || reset ? T('sendCode') : T('login')}</button>
-      <div class="switch-link">${reg ? T('haveAccount') : T('noAccount')} <a href="#/${reg ? 'login' : 'register'}${nextQ}">${reg ? T('login') : T('register')}</a></div>
+      <div class="switch-link">${reg ? T('haveAccount') : T('noAccount')} <a href="${U()}${reg ? 'login' : 'register'}${nextQ}">${reg ? T('login') : T('register')}</a></div>
     </form></div>`;
-    const finish = (r) => { setAuth(r.token, r.user); store.del('ref'); location.hash = next ? `#/${next}` : '#/profile'; };
+    const finish = (r) => { setAuth(r.token, r.user); store.del('ref'); go(next ? `${next}` : U('profile')); };
     $('#authForm').onsubmit = async (e) => {
       e.preventDefault();
       const fd = Object.fromEntries(new FormData(e.target));
@@ -1247,7 +1324,7 @@
       try { const r = await requestCode(fd.phone, reset ? 'reset' : 'register'); $('#codeErr').innerHTML = ''; startResendCountdown($('#resendBtn'), r.resend_in || 60); }
       catch (err) { $('#codeErr').innerHTML = errHtml(err); if (err.data && err.data.retry_in) startResendCountdown($('#resendBtn'), err.data.retry_in); }
     };
-    $('#changeNum').onclick = (e) => { e.preventDefault(); viewLogin(mode, new URLSearchParams(location.hash.split('?')[1] || '').get('next')); };
+    $('#changeNum').onclick = (e) => { e.preventDefault(); viewLogin(mode, new URLSearchParams(location.search).get('next')); };
     form.onsubmit = async (e) => {
       e.preventDefault();
       const extra = Object.fromEntries(new FormData(form));
@@ -1265,14 +1342,14 @@
   }
 
   async function viewProfile() {
-    if (!S.user) { location.hash = '#/quick?next=profile'; return; }
+    if (!S.user) { go(U('quick?next=profile')); return; }
     app.innerHTML = '<div class="spinner"></div>';
     let me;
-    try { me = await api('/me'); } catch { location.hash = '#/login?next=profile'; return; }
+    try { me = await api('/me'); } catch { go(U('login?next=profile')); return; }
     const u = me.user; const st = me.stats;
     S.user = u; store.set('user', u);
     const reward = `${fmt(S.settings.referral_reward)} ${T('currency')}`;
-    const shareText = T('shareMsg', { s: S.settings.store_name || '', c: u.referral_code }) + ` ${location.origin}/#/register?ref=${u.referral_code}`;
+    const shareText = T('shareMsg', { s: S.settings.store_name || '', c: u.referral_code }) + ` ${location.origin}${U('register')}?ref=${u.referral_code}`;
     const statuses = [['pending', I.clock, 'gray'], ['preparing', I.box, 'o'], ['shipping', I.truck, 'b'], ['delivered', I.check, 'g'], ['cancelled', I.xCircle, 'r']];
     const initials = (u.name || '?').slice(0, 2).toUpperCase();
     app.innerHTML = `
@@ -1282,7 +1359,7 @@
       </div></div>
       <div class="container" style="padding-bottom:30px">
         <div class="stats">
-          <a class="card stat" href="#/orders"><span class="mi o">${I.box}</span><div><div class="lbl">${T('myOrders')}</div><div class="val num">${st.orders}</div></div></a>
+          <a class="card stat" href="${U()}orders"><span class="mi o">${I.box}</span><div><div class="lbl">${T('myOrders')}</div><div class="val num">${st.orders}</div></div></a>
           <div class="card stat"><span class="mi g">${I.money}</span><div><div class="lbl">${T('totalSpent')}</div><div class="val">${money(st.total_spent)}</div></div></div>
         </div>
         ${u.wallet > 0 ? `<div class="wallet"><span class="mi">${I.wallet}</span><div><div class="lbl">${T('walletBalance')}</div><div class="val">${money(u.wallet)}</div></div></div>`
@@ -1296,15 +1373,16 @@
           </div>
         </div>
         <div class="card status-card">
-          <div class="hd"><h4>${T('myOrders')}</h4><a class="pill" href="#/orders">${T('viewAll')}</a></div>
-          <div class="status-grid">${statuses.map(([k, ic, c]) => `<a href="#/orders/${k}"><span class="mi ${c}">${ic}</span>${st.by_status[k] ? `<span class="n num">${st.by_status[k]}</span>` : ''}${T(`st_${k}`)}</a>`).join('')}</div>
+          <div class="hd"><h4>${T('myOrders')}</h4><a class="pill" href="${U()}orders">${T('viewAll')}</a></div>
+          <div class="status-grid">${statuses.map(([k, ic, c]) => `<a href="${U()}orders/${k}"><span class="mi ${c}">${ic}</span>${st.by_status[k] ? `<span class="n num">${st.by_status[k]}</span>` : ''}${T(`st_${k}`)}</a>`).join('')}</div>
         </div>
         <div class="card menu-list">
           <a class="menu-item" href="#invite"><span class="mi y">${I.gift}</span>${T('invite')}<span class="chev">${I.chev}</span></a>
-          ${S.settings.repair_enabled === '1' ? `<a class="menu-item" href="#/repairs"><span class="mi o">${I.wrench}</span>${T('myRepairs')}<span class="chev">${I.chev}</span></a>` : ''}
-          <a class="menu-item" href="#/addresses"><span class="mi o">${I.map}</span>${T('addresses')}<span class="chev">${I.chev}</span></a>
-          <a class="menu-item" href="#/edit-profile"><span class="mi g">${I.shield}</span>${T('editProfile')}<span class="chev">${I.chev}</span></a>
-          <a class="menu-item" href="#/support"><span class="mi b">${I.headset}</span>${T('support')}<span class="chev">${I.chev}</span></a>
+          ${S.settings.repair_enabled === '1' ? `<a class="menu-item" href="${U()}repairs"><span class="mi o">${I.wrench}</span>${T('myRepairs')}<span class="chev">${I.chev}</span></a>` : ''}
+          <a class="menu-item" href="${U()}wishlist"><span class="mi p">${I.heart}</span>${T('wishlist')}${S.wish.length ? `<span class="pill num">${S.wish.length}</span>` : ''}<span class="chev">${I.chev}</span></a>
+          <a class="menu-item" href="${U()}addresses"><span class="mi o">${I.map}</span>${T('addresses')}<span class="chev">${I.chev}</span></a>
+          <a class="menu-item" href="${U()}edit-profile"><span class="mi g">${I.shield}</span>${T('editProfile')}<span class="chev">${I.chev}</span></a>
+          <a class="menu-item" href="${U()}support"><span class="mi b">${I.headset}</span>${T('support')}<span class="chev">${I.chev}</span></a>
           ${u.role !== 'customer' ? `<a class="menu-item" href="${esc(S.adminPath || '/admin')}"><span class="mi r">${I.admin}</span>${T('adminPanel')}<span class="chev">${I.chev}</span></a>` : ''}
         </div>
         <button class="btn btn-danger btn-block" data-logout>${I.logout}${T('logout')}</button>
@@ -1314,20 +1392,20 @@
   }
 
   async function viewOrders(status) {
-    if (!S.user) { location.hash = '#/quick?next=orders'; return; }
+    if (!S.user) { go(U('quick?next=orders')); return; }
     const statuses = ['', 'pending', 'preparing', 'shipping', 'delivered', 'cancelled'];
     app.innerHTML = `${pageHead(T('myOrders'))}<div class="container">
-      <div class="tabs">${statuses.map((s) => `<a href="#/orders${s ? '/' + s : ''}"><button class="${(status || '') === s ? 'active' : ''}">${s ? T(`st_${s}`) : T('all')}</button></a>`).join('')}</div>
+      <div class="tabs">${statuses.map((s) => `<a href="${U()}orders${s ? '/' + s : ''}"><button class="${(status || '') === s ? 'active' : ''}">${s ? T(`st_${s}`) : T('all')}</button></a>`).join('')}</div>
       <div id="olist"><div class="spinner"></div></div></div>`;
     let orders = [];
     try { orders = await api(`/orders${status ? `?status=${status}` : ''}`); } catch { /* handled below */ }
     const el = $('#olist'); if (!el) return;
     if (!orders.length) {
-      el.innerHTML = `<div class="empty"><div class="ic sq">${I.box}</div><h3>${T('noOrders')}</h3><p>${T('noOrdersSub')}</p><a class="btn btn-primary" href="#/">${I.bag}${T('shopNow')}</a></div>`;
+      el.innerHTML = `<div class="empty"><div class="ic sq">${I.box}</div><h3>${T('noOrders')}</h3><p>${T('noOrdersSub')}</p><a class="btn btn-primary" href="${U()}">${I.bag}${T('shopNow')}</a></div>`;
       return;
     }
     el.innerHTML = orders.map((o) => `
-      <a class="card order-card" href="#/order/${o.id}">
+      <a class="card order-card" href="${U()}order/${o.id}">
         <div class="hd"><div><b>${esc(T('orderNo', { x: o.id }))}</b><div class="date">${esc(dateFmt(o.created_at))}</div></div><span class="st ${o.status}">${T(`st_${o.status}`)}</span></div>
         <div class="order-thumbs">${o.items.slice(0, 5).map((i) => `<img src="${img(i.image)}" alt="">`).join('')}</div>
         <div class="ft"><span>${o.items.reduce((a, i) => a + i.qty, 0)} ${T('pcs')}</span>${money(o.total)}</div>
@@ -1335,10 +1413,10 @@
   }
 
   async function viewOrder(id) {
-    if (!S.user) { location.hash = '#/login'; return; }
+    if (!S.user) { go(U('login')); return; }
     app.innerHTML = '<div class="spinner"></div>';
     let o;
-    try { o = await api(`/orders/${id}`); } catch { location.hash = '#/orders'; return; }
+    try { o = await api(`/orders/${id}`); } catch { go(U('orders')); return; }
     const flow = [['pending', I.clock], ['preparing', I.box], ['shipping', I.truck], ['delivered', I.check]];
     const idx = flow.findIndex(([k]) => k === o.status);
     app.innerHTML = `${pageHead(esc(T('orderNo', { x: o.id })), `<span class="st ${o.status}">${T(`st_${o.status}`)}</span>`)}
@@ -1346,7 +1424,7 @@
         <div>
           ${o.status !== 'cancelled' ? `<div class="card" style="padding:18px 10px;margin-bottom:14px"><div class="timeline">${flow.map(([k, ic], i) => `<div class="step ${i <= idx ? 'done' : ''}"><div class="c">${ic}</div>${T(`st_${k}`)}</div>`).join('')}</div></div>` : ''}
           <div id="rateBox"></div>
-          ${o.items.map((i) => `<div class="card cart-item"><a href="#/product/${i.product_id}"><img src="${img(i.image)}" alt=""></a><div class="info"><div class="nm">${esc(i.name)}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}<span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
+          ${o.items.map((i) => `<div class="card cart-item"><a href="${U(`product/${i.product_id}`)}"><img src="${img(i.image)}" alt=""></a><div class="info"><div class="nm">${esc(i.name)}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}<span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
         </div>
         <div class="card summary">
           <div class="sum-row"><span>${T('name')}</span><b>${esc(o.customer_name)}</b></div>
@@ -1382,7 +1460,7 @@
   }
 
   async function viewAddresses() {
-    if (!S.user) { location.hash = '#/login'; return; }
+    if (!S.user) { go(U('login')); return; }
     const list = await api('/me/addresses').catch(() => []);
     const cities = zones().map((z) => z.name);
     app.innerHTML = `${pageHead(T('addresses'))}<div class="container" style="max-width:640px;padding-top:18px">
@@ -1404,7 +1482,7 @@
   }
 
   function viewEditProfile() {
-    if (!S.user) { location.hash = '#/login'; return; }
+    if (!S.user) { go(U('login')); return; }
     const u = S.user;
     app.innerHTML = `${pageHead(T('editProfile'))}<div class="container"><form class="card form-card" id="epForm">
       <div id="epErr"></div>
@@ -1437,7 +1515,7 @@
           return;
         }
         const r = await api('/me', { method: 'PUT', body });
-        setAuth(S.token, r.user); toast(T('saved')); location.hash = '#/profile';
+        setAuth(null, r.user); toast(T('saved')); go(U('profile'));
       } catch (err) { $('#epErr').innerHTML = errHtml(err); }
     };
   }
@@ -1456,7 +1534,7 @@
   async function viewRepair(resume, start) {
     app.innerHTML = '<div class="spinner"></div>';
     const cat = await api('/repair/catalog').catch(() => ({ enabled: false }));
-    if (!cat.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_repair_disabled')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
+    if (!cat.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_repair_disabled')}</h3><a class="btn btn-primary" href="${U()}">${T('backToShop')}</a></div>`; return; }
     let st = { brand: null, model: null, service: null, quote: null, quality: null, problem: '', method: 'walkin', day: null, slot: null, city: '', address: '', lat: null, lng: null, acc: null, note: '' };
     if (resume) { const d = store.get('repair_draft', null); if (d) st = { ...st, ...d }; store.del('repair_draft'); }
     const wa = String(S.settings.whatsapp || '').replace(/\D/g, '');
@@ -1471,7 +1549,7 @@
         <div class="promises">${promises.map(([k, ic]) => `<div class="promise">${ic}<span>${T(k)}</span></div>`).join('')}</div>
         <div class="card how"><h3>${T('howTitle')}</h3><ol>${['how1', 'how2', 'how3', 'how4'].map((k) => `<li>${T(k)}</li>`).join('')}</ol></div>
         <details class="card faq"><summary>🔒 ${T('privacyTitle')}</summary><p>${esc(T('privacyText'))}</p></details>
-        <div class="repair-links"><a href="#/repairs">${I.wrench}${T('myRepairs')}</a><a href="#/warranty">${I.shield}${T('checkWarranty')}</a></div></div>`;
+        <div class="repair-links"><a href="${U()}repairs">${I.wrench}${T('myRepairs')}</a><a href="${U()}warranty">${I.shield}${T('checkWarranty')}</a></div></div>`;
       $('#startR').onclick = s1;
     };
     const brands = [...new Set(cat.models.map((m) => m.brand))];
@@ -1499,7 +1577,7 @@
       if (q.options.length === 1) st.quality = q.options[0].quality;
       app.innerHTML = shell(`${esc(st.model)} — ${esc(svcName(st.service))}`, `
         ${q.advice ? `<div class="advice">${I.help}<div><b>${T('adviceTitle')}</b><p>${esc(T('adviceText', { r: `${fmt(q.advice.repair_price)} ${T('currency')}`, v: `${fmt(q.advice.phone_value)} ${T('currency')}` }))}</p>
-          ${S.settings.tradein_enabled === '1' ? `<a class="btn btn-soft" href="#/tradein">${I.swap}${T('adviceBtn')}</a>` : ''}</div></div>` : ''}
+          ${S.settings.tradein_enabled === '1' ? `<a class="btn btn-soft" href="${U()}tradein">${I.swap}${T('adviceBtn')}</a>` : ''}</div></div>` : ''}
         <div class="r-options">${q.options.map((o) => `<button class="r-opt ${st.quality === o.quality ? 'on' : ''}" data-rq="${o.quality}">
           <div class="ro-top"><b>${T(`q_${o.quality}`)}</b>${o.quality === 'diagnosis' ? `<span class="free">${T('free')}</span>` : money(o.price)}</div>
           <div class="ro-meta"><span>${I.shield}${esc(T('warrantyDays', { x: o.warranty_days }))}</span>${q.duration_min ? `<span>${I.clock}${esc(T('durationMin', { x: q.duration_min }))}</span>` : ''}${q.duration_min && q.duration_min <= 60 ? `<span class="front">${I.check}${T('inFront')}</span>` : ''}</div></button>`).join('')}</div>
@@ -1612,13 +1690,13 @@
           <button class="btn btn-soft wz-back">${T('back')}</button>`, 5);
       app.querySelector('.wz-back').onclick = s4;
       $('#book').onclick = async () => {
-        if (!S.user) { store.set('repair_draft', st); location.hash = `#/quick?next=${encodeURIComponent('repair?resume=1')}`; return; }
+        if (!S.user) { store.set('repair_draft', st); go(`quick?next=${encodeURIComponent('repair?resume=1')}`); return; }
         const btn = $('#book'); btn.disabled = true;
         try {
           const r = await api('/repairs', { method: 'POST', body: { brand: st.brand, model: st.model, service_id: st.service.id, quality: st.quality, method: st.method, appointment: st.slot, city: st.city, address: st.address, problem: st.problem,
             lat: st.lat, lng: st.lng, loc_accuracy: st.acc, pickup_note: st.note } });
           toast(T('repairBooked'));
-          location.hash = `#/repairs/${r.code}`;
+          go(`repairs/${r.code}`);
         } catch (e) { btn.disabled = false; toast(errMsg(e)); if (e.code === 'repair_slot' || e.code === 'repair_location') s4(); }
       };
     };
@@ -1626,21 +1704,21 @@
   }
 
   async function viewRepairs(code) {
-    if (!S.user) { location.hash = '#/quick?next=repairs'; return; }
+    if (!S.user) { go(U('quick?next=repairs')); return; }
     if (code) return viewRepairTicket(code);
     app.innerHTML = `${pageHead(T('myRepairs'))}<div class="container" style="padding-top:16px" id="rl"><div class="spinner"></div></div>`;
     const list = await api('/repairs').catch(() => []);
-    $('#rl').innerHTML = list.length ? list.map((r) => `<a class="card order-card" href="#/repairs/${esc(r.code)}">
+    $('#rl').innerHTML = list.length ? list.map((r) => `<a class="card order-card" href="${U()}repairs/${esc(r.code)}">
         <div class="hd"><div><b class="num">${esc(r.code)}</b><div class="date">${esc(`${r.brand} ${r.model}`)} · ${esc(L(r.service, 'name'))}</div></div><span class="st ${rStCls(r.status)}">${T(`rs_${r.status}`)}</span></div>
         <div class="ft"><span>${esc(r.appointment || r.city || '')}</span>${r.quality === 'diagnosis' && r.final_price == null ? `<b>${T('q_diagnosis')}</b>` : money(r.total)}</div></a>`).join('')
-      : `<div class="empty"><div class="ic sq">${I.wrench}</div><h3>${T('noRepairs')}</h3><a class="btn btn-primary" href="#/repair">${T('repairStart')}</a></div>`;
+      : `<div class="empty"><div class="ic sq">${I.wrench}</div><h3>${T('noRepairs')}</h3><a class="btn btn-primary" href="${U()}repair">${T('repairStart')}</a></div>`;
   }
   const rStCls = (s) => ({ booked: 'pending', received: 'preparing', diagnosing: 'preparing', awaiting_approval: 'cancelled', repairing: 'shipping', testing: 'shipping', ready: 'delivered', delivered: 'delivered', cancelled: 'cancelled' }[s] || 'pending');
 
   async function viewRepairTicket(code) {
     app.innerHTML = '<div class="spinner"></div>';
     let r;
-    try { r = await api(`/repairs/${encodeURIComponent(code)}`); } catch { location.hash = '#/repairs'; return; }
+    try { r = await api(`/repairs/${encodeURIComponent(code)}`); } catch { go(U('repairs')); return; }
     const flow = ['booked', 'received', 'diagnosing', 'repairing', 'testing', 'ready', 'delivered'];
     const cur = r.status === 'awaiting_approval' ? flow.indexOf('diagnosing') : flow.indexOf(r.status);
     const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
@@ -1657,7 +1735,7 @@
         ${r.status === 'delivered' && r.warranty_until ? `<div class="card cert" id="cert"><div class="cert-hd">${I.shield}<b>${T('certTitle')}</b></div>
           <div class="cert-code num">${esc(r.code)}</div><div class="cert-dev">${esc(`${r.brand} ${r.model}`)} · ${esc(L(r.service, 'name'))} · ${T(`q_${r.quality}`)}</div>
           <div class="cert-valid ${valid ? 'ok' : 'no'}">${valid ? esc(T('validUntil', { x: r.warranty_until })) : T('expired')}</div>
-          <div id="qr"></div><div class="cert-url num">${esc(`${location.origin}/#/warranty/${r.code}`)}</div>
+          <div id="qr"></div><div class="cert-url num">${esc(`${location.origin}${U(`warranty/${r.code}`)}`)}</div>
           ${r.old_part_returned ? `<div class="ti-note" style="justify-content:center">${I.check}<span>${T('oldPartBack')}</span></div>` : ''}
           <button class="btn btn-soft" id="printCert">${T('printCert')}</button></div>` : ''}
       </div>
@@ -1679,9 +1757,9 @@
       try { await api(`/repairs/${r.code}/decision`, { method: 'POST', body: { approve: b.dataset.dec === '1' } }); viewRepairTicket(r.code); } catch (e) { toast(errMsg(e)); }
     });
     if ($('#rCancel')) $('#rCancel').onclick = async () => { if (!confirm(T('confirmCancel'))) return; await api(`/repairs/${r.code}/cancel`, { method: 'POST' }).catch(() => {}); viewRepairTicket(r.code); };
-    if ($('#printCert')) $('#printCert').onclick = () => window.print();
+    if ($('#printCert')) $('#printCert').onclick = () => window.open(`${BASE}certificate/${encodeURIComponent(r.code)}?lang=${S.lang}`, '_blank', 'noopener');
     drawRepairComments(r);
-    if ($('#qr')) drawQr($('#qr'), `${location.origin}/#/warranty/${r.code}`);
+    if ($('#qr')) drawQr($('#qr'), `${location.origin}${U(`warranty/${r.code}`)}`);
   }
   function drawRepairComments(r) {
     const el = $('#rComments'); if (!el) return;
@@ -1742,7 +1820,7 @@
   async function viewTradein(fromCart) {
     app.innerHTML = '<div class="spinner"></div>';
     const data = await api('/tradein/models').catch(() => ({ enabled: false, models: [] }));
-    if (!data.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_tradein_disabled')}</h3><a class="btn btn-primary" href="#/">${T('backToShop')}</a></div>`; return; }
+    if (!data.enabled) { app.innerHTML = `<div class="empty"><h3>${T('err_tradein_disabled')}</h3><a class="btn btn-primary" href="${U()}">${T('backToShop')}</a></div>`; return; }
     const models = data.models;
     const st = { brand: null, model: null, model_id: null, answers: {} };
     const qKeys = Object.keys(TI_Q);
@@ -1792,10 +1870,10 @@
         ${q.breakdown.length ? `<ul class="ti-break">${q.breakdown.map((b) => `<li><span>${T(`qs_${b.q}`)}: <b>${T(`a_${b.q}_${b.a}`)}</b></span><b class="num">-${b.pct}%</b></li>`).join('')}</ul>` : ''}
         <p class="ti-note">${I.shield}<span>${T('tiNote')}</span></p>
         ${hasCart ? `<button class="btn btn-primary btn-block" id="useTi">${I.basket}${T('tiUse')}</button>` : ''}
-        <a class="btn ${hasCart ? 'btn-soft' : 'btn-primary'} btn-block" href="#/finder" id="shopTi" style="margin-top:10px">${I.spark}${T('tiShop')}</a>
+        <a class="btn ${hasCart ? 'btn-soft' : 'btn-primary'} btn-block" href="${U()}finder" id="shopTi" style="margin-top:10px">${I.spark}${T('tiShop')}</a>
         <button class="btn btn-soft btn-block" id="againTi" style="margin-top:10px">${T('retake')}</button></div></div>`;
       const save = () => { S.tradein = { model_id: st.model_id, answers: st.answers, estimate: q.estimate, label: q.label }; store.set('tradein', S.tradein); };
-      if (hasCart) $('#useTi').onclick = () => { save(); toast(T('tiApplied')); location.hash = '#/cart'; };
+      if (hasCart) $('#useTi').onclick = () => { save(); toast(T('tiApplied')); go(U('cart')); };
       $('#shopTi').onclick = () => save(); // keep it: it will show in the cart later
       $('#againTi').onclick = () => { st.answers = {}; stepBrand(); };
     };
@@ -1836,13 +1914,13 @@
       productCache.set(r.product.id, r.product);
       return `<div class="card fd-card ${r.best ? 'best' : ''}">
         ${r.best ? `<span class="fd-badge">${I.star}${T('bestPick')}</span>` : r.best_value ? `<span class="fd-badge value">${T('bestValue')}</span>` : ''}
-        <a href="#/product/${r.product.id}" class="fd-img"><img src="${img(r.product.image)}" alt=""></a>
+        <a href="${U(`product/${pkey(r.product)}`)}" class="fd-img"><img src="${img(r.product.image)}" alt=""></a>
         <div class="fd-body">
           <div class="nm">${esc(L(r.product, 'name'))}${r.variant ? ` <span class="vlabel">${esc(r.variant.label)}</span>` : ''}</div>
           ${money(r.price)}
           ${r.match != null ? `<div class="fd-match"><div class="bar"><i style="width:${r.match}%"></i></div><span>${esc(T('match', { x: r.match }))}</span></div>` : ''}
           <ul class="fd-reasons">${r.reasons.map((x) => `<li>${I.check}<span>${esc(T(`r_${x.code}`, { x: x.code === 'under_budget' ? `${fmt(x.x)} ${T('currency')}` : x.x }))}</span></li>`).join('')}</ul>
-          <div class="fd-actions"><a class="btn btn-soft" href="#/product/${r.product.id}">${T('viewProduct')}</a><button class="btn btn-primary" data-fadd="${r.product.id}" data-fvar="${r.variant ? r.variant.id : ''}">${I.basket}${T('addToCart')}</button></div>
+          <div class="fd-actions"><a class="btn btn-soft" href="${U(`product/${pkey(r.product)}`)}">${T('viewProduct')}</a><button class="btn btn-primary" data-fadd="${r.product.id}" data-fvar="${r.variant ? r.variant.id : ''}">${I.basket}${T('addToCart')}</button></div>
         </div></div>`;
     };
     const results = async () => {
@@ -1855,7 +1933,7 @@
           : `<div class="empty" style="padding:30px 10px 10px"><div class="ic sq">${I.search}</div><h3>${T('noMatch')}</h3></div>
              ${r.stretch ? `<p class="wz-sub" style="text-align:center">${esc(T('stretchHint', { x: `${fmt(r.stretch.over_by)} ${T('currency')}` }))}</p><div class="fd-grid">${card(r.stretch)}</div>` : ''}`}
         <button class="btn btn-soft btn-block" id="retake" style="margin-top:16px">${T('retake')}</button>
-        ${S.settings.tradein_enabled === '1' ? `<a class="ti-banner" href="#/tradein" style="margin-top:12px">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}</div>`;
+        ${S.settings.tradein_enabled === '1' ? `<a class="ti-banner" href="${U()}tradein" style="margin-top:12px">${I.swap}<span>${T('tiCartBanner')}</span>${I.chev}</a>` : ''}</div>`;
       $('#retake').onclick = () => { st.uses = []; s1(); };
       app.querySelectorAll('[data-fadd]').forEach((b) => b.onclick = () => {
         const res = [...r.results, r.stretch].filter(Boolean).find((x) => x.product.id === Number(b.dataset.fadd));
@@ -1869,7 +1947,7 @@
     app.innerHTML = `${pageHead(T('faq'))}<div class="container" style="max-width:760px;padding-top:18px" id="faqList"><div class="spinner"></div></div>`;
     const list = await api('/faqs').catch(() => []);
     $('#faqList').innerHTML = list.map((f) => `<details class="card faq"><summary>${esc(L(f, 'q'))}</summary><p>${esc(L(f, 'a'))}</p></details>`).join('')
-      + `<div class="empty" style="padding:24px"><p>${T('whatsappAsk')}</p><a class="btn btn-primary" href="#/support">${I.headset}${T('support')}</a></div>`;
+      + `<div class="empty" style="padding:24px"><p>${T('whatsappAsk')}</p><a class="btn btn-primary" href="${U()}support">${I.headset}${T('support')}</a></div>`;
   }
   function viewMaintenance() {
     app.innerHTML = `<div class="empty" style="padding:90px 20px"><div class="ic">${I.clock}</div><h3>${T('maintenanceTitle')}</h3>
@@ -1878,15 +1956,15 @@
   }
   // Anonymous page-view counter for the admin "visitor analytics" page (no cookies).
   function track(path, productId) {
-    try { fetch('/api/track', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: `Bearer ${S.token}` } : {}) }, body: JSON.stringify({ path, product_id: productId || undefined, src: campaignSource() || undefined }), keepalive: true }); } catch { /* ignore */ }
+    try { fetch(`${BASE}api/track`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...csrfHeaders() }, body: JSON.stringify({ path, product_id: productId || undefined, src: campaignSource() || undefined }), keepalive: true }); } catch { /* ignore */ }
   }
 
   // ---------------- bottom tab bar (mobile, thumb zone) ----------------
   function renderTabbar(p0) {
     const n = cartCount();
-    const tabs = [['#/', I.home, T('tabHome'), !p0], ['#', I.list, T('tabCats'), false, 'data-open-cats'],
-      S.settings.repair_enabled === '1' ? ['#/repair', I.wrench, T('tabRepair'), ['repair', 'repairs', 'warranty'].includes(p0)] : ['#/finder', I.spark, T('finderTitle').split(' ')[0], p0 === 'finder'],
-      ['#/cart', I.basket, T('tabCart'), p0 === 'cart', '', n], ['#/profile', I.user, T('tabMe'), ['profile', 'orders', 'order', 'addresses', 'quick', 'login'].includes(p0)]];
+    const tabs = [[U(''), I.home, T('tabHome'), !p0], ['#', I.list, T('tabCats'), false, 'data-open-cats'],
+      S.settings.repair_enabled === '1' ? [U('repair'), I.wrench, T('tabRepair'), ['repair', 'repairs', 'warranty'].includes(p0)] : [U('finder'), I.spark, T('finderTitle').split(' ')[0], p0 === 'finder'],
+      [U('cart'), I.basket, T('tabCart'), p0 === 'cart', '', n], [U('profile'), I.user, T('tabMe'), ['profile', 'orders', 'order', 'addresses', 'quick', 'login'].includes(p0)]];
     $('#tabbar').innerHTML = tabs.map(([href, ic, label, on, attr, badge]) => `<a href="${href}" class="${on ? 'on' : ''}" ${attr || ''}>${ic}${badge ? `<b class="num">${badge}</b>` : ''}<span>${esc(label)}</span></a>`).join('');
   }
 
@@ -1895,10 +1973,10 @@
     app.onclick = null;
     S.waContext = '';
     // No floating button where the customer is finishing a purchase — it would cover the main button.
-    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset', 'tradein', 'finder', 'repair'].includes(location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]);
+    S.hideWa = ['cart', 'checkout', 'quick', 'login', 'register', 'reset', 'tradein', 'finder', 'repair'].includes(here().split(/[/?]/)[0]);
     renderWhatsApp();
     closePanels();
-    const [pathPart, query] = location.hash.replace(/^#/, '').split('?');
+    const [pathPart, query] = here().split('?');
     const parts = pathPart.split('/').filter(Boolean);
     const qs = new URLSearchParams(query || '');
     if (qs.get('ref')) store.set('ref', qs.get('ref'));
@@ -1910,14 +1988,15 @@
     document.body.classList.toggle('no-tabbar', ['product', 'checkout', 'quick', 'login', 'register', 'reset'].includes(p0));
     $('#buybar').classList.toggle('hidden', p0 !== 'product');
     renderTabbar(p0);
-    track(`/${parts.slice(0, p0 === 'product' || p0 === 'category' ? 2 : 1).join('/')}`, p0 === 'product' ? Number(p1) : null);
+    track(`/${parts.slice(0, p0 === 'product' || p0 === 'category' ? 2 : 1).join('/')}`, p0 === 'product' ? parseInt(p1, 10) : null);
+    syncLangLinks();
     const staff = S.user && S.user.role && S.user.role !== 'customer';
     if (S.settings.maintenance_mode === '1' && !staff && !['login', 'quick', 'faq'].includes(p0)) return viewMaintenance();
     switch (p0) {
       case undefined: return viewHome();
-      case 'category': return viewCategory(Number(p1));
+      case 'category': return viewCategory(parseInt(p1, 10));
       case 'search': return viewSearch(decodeURIComponent(p1 || ''));
-      case 'product': return viewProduct(Number(p1));
+      case 'product': return viewProduct(parseInt(p1, 10));
       case 'cart': return viewCart();
       case 'checkout': return viewCheckout();
       case 'login': return viewLogin('login', qs.get('next'));
@@ -1937,12 +2016,13 @@
       case 'repairs': return viewRepairs(p1);
       case 'warranty': return viewWarranty(p1);
       case 'compare': return viewCompare(qs.get('ids'));
+      case 'wishlist': return viewWishlist();
       default: return viewHome();
     }
   }
 
   function captureSource() {
-    const qs = new URLSearchParams(location.search || (location.hash.split('?')[1] || ''));
+    const qs = new URLSearchParams(location.search);
     const src = [qs.get('utm_source') || qs.get('src'), qs.get('utm_campaign')].filter(Boolean).join('_').replace(/[^\w\-.]/g, '').slice(0, 60);
     if (src) store.set('src', { v: src, t: Date.now() });
   }
@@ -1971,6 +2051,8 @@
   }
 
   async function init() {
+    // Old links (#/product/5) still work: they are moved to the real address.
+    if (location.hash.startsWith('#/')) history.replaceState(null, '', U(location.hash.slice(2)));
     captureSource();
     $('#year').textContent = new Date().getFullYear();
     applyLang();
@@ -1986,13 +2068,19 @@
       document.querySelector('.footer .container').insertBefore(f, document.querySelector('.footer .container').lastElementChild);
     }
     if (settings.slogan) { const sl = document.createElement('div'); sl.className = 'footer-slogan'; sl.textContent = settings.slogan; document.querySelector('.footer .logo').after(sl); }
-    const fl = document.createElement('div'); fl.className = 'footer-links'; fl.innerHTML = `<a href="#/faq">${T('faq')}</a> · <a href="#/support">${T('support')}</a>`;
+    const fl = document.createElement('div'); fl.className = 'footer-links'; fl.innerHTML = `<a href="${U()}faq">${T('faq')}</a> · <a href="${U()}support">${T('support')}</a>`;
     document.querySelector('.footer .container').insertBefore(fl, document.querySelector('.footer .container').lastElementChild);
-    if (S.user && S.user.role !== 'customer') { try { const me = await api('/me'); S.adminPath = me.admin_path; S.user = me.user; } catch { /* signed out */ } }
-    if (!S.langChosen) { await askLanguage(); applyLang(); }
+    if (S.user) {
+      try { const me = await api('/me'); S.adminPath = me.admin_path; S.user = me.user; store.set('user', me.user); syncWish(); } catch { S.user = null; store.del('user'); }
+    }
+    store.del('token');
+    if (!S.langChosen) {
+      const before = S.lang; await askLanguage(); applyLang();
+      if (S.lang !== before) history.replaceState(null, '', U(here()));
+    } else store.set('lang', S.lang);
     renderMenu();
     renderWhatsApp();
-    window.addEventListener('hashchange', route);
+    window.addEventListener('popstate', route);
     route();
   }
   init();
