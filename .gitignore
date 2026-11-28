@@ -3,6 +3,8 @@
 # backups and runtime files
 /storage/backups/*
 !/storage/backups/.htaccess
+/storage/cache/*
+!/storage/cache/.htaccess
 # customer / admin uploads (demo images and the protection file are kept)
 /uploads/*
 !/uploads/.htaccess

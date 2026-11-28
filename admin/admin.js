@@ -5,6 +5,7 @@
   const root = $('#root');
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+  const fmtBytes = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil((b || 0) / 1024)} KB`);
   const BASE = (document.querySelector('meta[name="rp-base"]') || {}).content || '/';
   const abs = (u) => (/^\/(uploads|img)\//.test(u) ? BASE + u.slice(1) : u);
   const safeImg = (u) => esc(abs(/^(https?:\/\/|\/)/i.test(String(u || '')) ? u : '/img/placeholder.svg'));
@@ -259,7 +260,7 @@
         ${list.map((p) => `<tr>
           <td><img src="${safeImg(p.image)}"></td>
           <td><b>${esc(p.name_ku)}</b><br><span class="muted">${esc(p.name_en || '')}</span>
-            <div>${p.featured ? '<span class="pill">مميز</span> ' : ''}${p.flash_sale ? '<span class="pill" style="background:var(--red-soft);color:var(--red)">تخفيض سريع</span> ' : ''}${p.trending ? '<span class="pill" style="background:#EEF0F4;color:var(--ink)">رائج</span>' : ''}${p.low_margin ? ' <span class="pill" style="background:var(--red-soft);color:var(--red)" title="الربح أقل من الحد الأدنى بالإعدادات">⚠️ ربح قليل</span>' : ''}${p.cost_price == null && !(p.variants || []).some((v) => v.cost_price != null) ? ' <span class="pill" style="background:#FFF4E5;color:#D97706" title="بدون سعر الشراء ما ينحسب الربح">بدون سعر شراء</span>' : ''}</div></td>
+            <div>${p.is_used ? `<span class="pill" style="background:#CCFBF1;color:#0F766E">♻️ مستعمل ${esc(p.condition_grade || '')}${p.battery_health ? ` · 🔋${p.battery_health}%` : ''}</span> ` : ''}${p.model_code ? `<span class="pill num" dir="ltr">${esc(p.model_code)}</span> ` : ''}${!p.active ? '<span class="pill" style="background:var(--red-soft);color:var(--red)">مسودة مخفية</span> ' : ''}${p.featured ? '<span class="pill">مميز</span> ' : ''}${p.flash_sale ? '<span class="pill" style="background:var(--red-soft);color:var(--red)">تخفيض سريع</span> ' : ''}${p.trending ? '<span class="pill" style="background:#EEF0F4;color:var(--ink)">رائج</span>' : ''}${p.low_margin ? ' <span class="pill" style="background:var(--red-soft);color:var(--red)" title="الربح أقل من الحد الأدنى بالإعدادات">⚠️ ربح قليل</span>' : ''}${p.cost_price == null && !(p.variants || []).some((v) => v.cost_price != null) ? ' <span class="pill" style="background:#FFF4E5;color:#D97706" title="بدون سعر الشراء ما ينحسب الربح">بدون سعر شراء</span>' : ''}</div></td>
           <td>${esc(catName(p.category_id))}</td>
           <td class="num">${p.has_variants ? '<span class="muted">من </span>' : ''}<b>${fmt(p.price)}</b>${p.old_price ? `<br><s class="muted">${fmt(p.old_price)}</s>` : ''}${p.has_variants ? `<br><span class="muted">${p.variants.length} أنواع</span>` : ''}${p.usd_priced ? `<br><span class="pill" style="background:#E6F7EF;color:var(--green)">$${fmt(p.has_variants ? Math.min(...p.variants.map((v) => v.price_usd || Infinity)) : p.price_usd)}</span>` : ''}</td>
           <td class="num" style="font-weight:800;color:${p.stock === 0 ? 'var(--red)' : p.stock <= 3 ? '#D97706' : 'inherit'}">${p.stock}<br><button class="sm-btn" data-restock="${p.id}" style="margin-top:4px;font-size:12px">+ إضافة</button></td>
@@ -303,6 +304,21 @@
         ${langFields('name', p, 'اسم المنتج *')}
         <div class="field"><label>القسم</label><select class="input" name="category_id"><option value="">—</option>${catOptions(p.category_id)}</select></div>
         <div class="field"><label>الماركة</label><input class="input" name="brand" value="${esc(p.brand || '')}" placeholder="Apple, Samsung..."></div>
+        <div class="field"><label>🔢 رمز الموديل (للبحث)</label><input class="input num" name="model_code" dir="ltr" maxlength="60" value="${esc(p.model_code || '')}" placeholder="A2894, SM-S928B, 2311DRK48G"></div>
+        <div class="field full used-box">
+          <label class="usd-toggle"><input type="checkbox" name="is_used" id="isUsed" ${p.is_used ? 'checked' : ''}> ♻️ موبايل مستعمل / مجدد</label>
+          <div class="used-fields" id="usedFields" ${p.is_used ? '' : 'hidden'}>
+            <div class="fgrid3">
+              <div><span class="attr-lbl">تقييم الحالة *</span><select class="input sm" name="condition_grade"><option value="">—</option>${[['A+', 'A+ ممتاز مثل الجديد'], ['A', 'A نظيف'], ['B', 'B جيد'], ['C', 'C مقبول']].map(([k, l]) => `<option value="${k}" ${p.condition_grade === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+              <div><span class="attr-lbl">صحة البطارية %</span><input class="input sm num" type="number" min="1" max="100" name="battery_health" value="${p.battery_health ?? ''}"></div>
+              <div><span class="attr-lbl">ضمان المحل (يوم)</span><input class="input sm num" type="number" min="0" max="730" name="used_warranty_days" value="${p.used_warranty_days ?? 30}"></div>
+              <label class="g5"><input type="checkbox" name="has_box" ${p.has_box ? 'checked' : ''}> 📦 الكرتونة موجودة</label>
+              <label class="g5"><input type="checkbox" name="has_charger" ${p.has_charger ? 'checked' : ''}> 🔌 الشاحن موجود</label>
+            </div>
+            <div class="fgrid3" style="margin-top:8px">${[['ku', 'کوردی'], ['ar', 'عربي'], ['en', 'English']].map(([l, n]) => `<div><span class="attr-lbl">ملاحظات الشكل (${n})</span><textarea class="input sm" rows="2" name="cosmetic_notes_${l}" placeholder="${l === 'en' ? 'Small scratch on the frame' : 'خدش صغير بالإطار'}">${esc(p[`cosmetic_notes_${l}`] || '')}</textarea></div>`).join('')}</div>
+            <p class="muted" style="font-size:12px;margin:6px 0 0">صوّر الجهاز الحقيقي (أمام، خلف، الإطار) وأضفها بالصور الإضافية — الزبون يشوف نفس الجهاز اللي يشتريه.</p>
+          </div>
+        </div>
         <div class="field full"><label class="usd-toggle"><input type="checkbox" name="usd_priced" ${p.usd_priced ? 'checked' : ''}> 💵 السعر بالدولار — يتحدث تلقائياً مع سعر الصرف ${Number(settingsCache.usd_rate) ? `(${fmt(settingsCache.usd_rate)} د.ع لكل $)` : '<b style="color:var(--red)">(حدد سعر الصرف من الإعدادات أولاً)</b>'}</label></div>
         <div class="field"><label data-cur-label="السعر">السعر (د.ع) *</label><input class="input num" type="number" min="0" step="any" name="price" value="${p.usd_priced ? (p.price_usd ?? '') : (p.price ?? '')}" required><div class="muted usd-hint" data-hint="price"></div></div>
         <div class="field"><label data-cur-label="السعر القديم (للخصم)">السعر القديم (للخصم)</label><input class="input num" type="number" min="0" step="any" name="old_price" value="${p.usd_priced ? (p.old_price_usd ?? '') : (p.old_price ?? '')}"><div class="muted usd-hint" data-hint="old_price"></div></div>
@@ -324,6 +340,10 @@
           </div></div>
         <div class="field full"><label>📋 المواصفات (تظهر كجدول بصفحة المنتج)</label><div id="specs"></div><button type="button" class="sm-btn" id="addSpec">+ إضافة مواصفة</button>
           <span class="muted" style="font-size:12px;margin-inline-start:8px">مثل: الذاكرة 256GB · الرام 8GB · البطارية 4500mAh · الضمان سنة</span></div>
+        <div class="field full compat-box" id="compatBox"><label>📱 الموبايلات المناسبة (للإكسسوارات) — اكتب الموديل واضغط Enter</label>
+          <div class="tag-input" id="compatTags"></div>
+          <input class="input" id="compatIn" list="compatList" autocomplete="off" placeholder="iPhone 15 Pro Max, Galaxy S24 Ultra, Redmi Note 13 Pro"><datalist id="compatList"></datalist>
+          <p class="muted" style="font-size:12px;margin:4px 0 0">اتركها فارغة للإكسسوارات العامة (شاحن، كيبل USB-C، باور بانك) — المتجر يطابقها تلقائياً.</p></div>
         ${tagsCache.length ? `<div class="field full"><label>🔖 الملصقات</label><div class="toggles">${tagsCache.map((t) => `<label><input type="checkbox" data-tag="${t.id}" ${(p.tag_ids || []).includes(t.id) ? 'checked' : ''}> <span class="pill" style="background:${esc(t.color)}22;color:${esc(t.color)}">${esc(t.name_ku)}</span></label>`).join('')}</div></div>` : ''}
         <div class="field full"><label>🛍️ "يشترونها سوية" — اختر حتى 4 منتجات (إذا تركته فارغاً، يُختار تلقائياً من مشتريات الزبائن)</label>
           <input class="input" id="bundleSearch" placeholder="ابحث عن منتج..." style="height:40px;margin-bottom:6px"><div class="bundle-box" id="bundleBox"></div></div>
@@ -437,6 +457,26 @@
         m.querySelectorAll('[data-rmg]').forEach((b) => b.onclick = () => { gallery.splice(Number(b.dataset.rmg), 1); drawGal(); });
       };
       drawGal();
+      // used phone fields
+      const usedBox = m.querySelector('#isUsed');
+      usedBox.onchange = () => { m.querySelector('#usedFields').hidden = !usedBox.checked; };
+      // compatible phone models (accessories only)
+      let compat = [...(p.compatible_models || [])];
+      const drawCompat = () => {
+        m.querySelector('#compatTags').innerHTML = compat.map((x, i) => `<span class="tg">${esc(x)}<button type="button" data-rmc="${i}" aria-label="remove">×</button></span>`).join('');
+        m.querySelectorAll('[data-rmc]').forEach((b) => b.onclick = () => { compat.splice(Number(b.dataset.rmc), 1); drawCompat(); });
+      };
+      const addCompat = (v) => { v = String(v || '').trim(); if (v && !compat.some((x) => x.toLowerCase() === v.toLowerCase()) && compat.length < 40) compat.push(v); m.querySelector('#compatIn').value = ''; drawCompat(); };
+      m.querySelector('#compatIn').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCompat(e.target.value); } };
+      m.querySelector('#compatIn').onchange = (e) => { if (e.target.value && [...m.querySelectorAll('#compatList option')].some((o) => o.value === e.target.value)) addCompat(e.target.value); };
+      const osSel = m.querySelector('[data-attr=os]');
+      const toggleCompat = () => { m.querySelector('#compatBox').hidden = !!osSel.value; };
+      osSel.addEventListener('change', toggleCompat); toggleCompat();
+      drawCompat();
+      api('/accessories/models').then((r) => {
+        const opts = r.brands.flatMap((b) => b.models.map((x) => (x.label.toLowerCase().startsWith(b.brand.toLowerCase()) || /^(iphone|galaxy|redmi|poco|pixel)/i.test(x.label) ? x.label : `${b.brand} ${x.label}`)));
+        m.querySelector('#compatList').innerHTML = [...new Set(opts)].map((x) => `<option value="${esc(x)}">`).join('');
+      }).catch(() => {});
       m.querySelector('#galUp').onchange = async (e) => {
         for (const f of e.target.files) { try { gallery.push(await upload(f)); } catch (err) { toast(err.message); } }
         drawGal();
@@ -445,7 +485,9 @@
         e.preventDefault();
         const fd = new FormData(e.target);
         const body = Object.fromEntries(fd);
-        ['active', 'featured', 'trending', 'flash_sale', 'usd_priced'].forEach((k) => { body[k] = fd.has(k); });
+        ['active', 'featured', 'trending', 'flash_sale', 'usd_priced', 'is_used', 'has_box', 'has_charger'].forEach((k) => { body[k] = fd.has(k); });
+        body.compatible_models = m.querySelector('[data-attr=os]').value ? [] : compat;
+        if (body.is_used && !body.condition_grade) return toast('اختر تقييم حالة الموبايل المستعمل');
         body.images = gallery;
         body.variants = variants.filter((v) => String(v.label).trim() && Number(v.price) > 0);
         body.specs = specs.filter((x) => String(x.k).trim() && String(x.v).trim());
@@ -626,6 +668,14 @@
       <div class="field full set-sec"><h3>🔎 محركات البحث (SEO)</h3><p class="muted">عنوان ووصف الصفحة الرئيسية لكل لغة — يظهر في Google ومعاينة الروابط.</p></div>
       ${['ku', 'ar', 'en'].map((l) => `${F(`seo_title_${l}`, `عنوان الصفحة (${l.toUpperCase()})`)}${F(`seo_description_${l}`, `الوصف (${l.toUpperCase()})`)}`).join('')}
     </div><button class="btn btn-primary">حفظ الإعدادات</button></form>`;
+    c.insertAdjacentHTML('beforeend', `<div class="card panel" style="max-width:820px"><h3>⚡ السرعة والكاش</h3>
+      <p class="muted">المتجر يحفظ الأقسام والمنتجات والإعدادات بملفات سريعة حتى يفتح بسرعة على 4G. أي تعديل باللوحة يمسح الكاش المتعلق بيه تلقائياً.</p>
+      <div class="toolbar"><span id="cacheInfo" class="muted">…</span><button type="button" class="sm-btn danger" id="cacheClear">🧹 مسح الكاش</button></div></div>`);
+    const showCache = (st) => { $('#cacheInfo').textContent = `${st.files} ملف · ${fmtBytes(st.bytes)}${st.writable ? '' : ' — ⚠️ مجلد storage/cache غير قابل للكتابة'}`; };
+    api('/admin/cache').then(showCache).catch(() => { $('#cacheInfo').textContent = '—'; });
+    $('#cacheClear').onclick = async () => {
+      try { const st = await api('/admin/cache/clear', { method: 'POST' }); showCache(st); toast(`تم مسح ${st.cleared} ملف`); } catch (err) { toast(err.message); }
+    };
     $('#otpTest').onclick = async () => {
       const out = $('#otpTestRes'); out.textContent = '…';
       try { const r = await api('/admin/settings/test-otp', { method: 'POST', body: { phone: $('#otpTestPhone').value } }); out.textContent = r.test_mode ? `وضع التجربة — الرمز ${r.dev_code}` : `تم الإرسال إلى ${r.phone}`; }
@@ -719,7 +769,7 @@
     const c = layout('security', 'الأمان والنسخ الاحتياطي');
     const [me, backups, log] = await Promise.all([api('/me'), isOwner() ? api('/admin/backups') : [], isOwner() ? api('/admin/log') : []]);
     const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.ceil(b / 1024)} KB`);
-    const ACTIONS = { repair_status: 'تغيير حالة تصليح', repair_extra: 'طلب كلفة إضافية', repair_price: 'سعر تصليح', tradein_model: 'تعديل سعر موديل تبديل', tradein_rules: 'نسب خصم التبديل', tradein_review: 'فحص جهاز تبديل', stock_adjust: 'تعديل المخزن', expense_add: 'إضافة مصروف', expense_delete: 'حذف مصروف', bulk_price: 'تغيير أسعار بالجملة', variant_presets: 'قوالب الأنواع', staff_role: 'تغيير صلاحية موظف', coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
+    const ACTIONS = { repair_status: 'تغيير حالة تصليح', repair_extra: 'طلب كلفة إضافية', repair_price: 'سعر تصليح', tradein_model: 'تعديل سعر موديل تبديل', tradein_rules: 'نسب خصم التبديل', tradein_review: 'فحص جهاز تبديل', tradein_list_used: 'عرض تبديل كمستعمل', cache_clear: 'مسح الكاش', stock_adjust: 'تعديل المخزن', expense_add: 'إضافة مصروف', expense_delete: 'حذف مصروف', bulk_price: 'تغيير أسعار بالجملة', variant_presets: 'قوالب الأنواع', staff_role: 'تغيير صلاحية موظف', coupon_create: 'إضافة كوبون', coupon_update: 'تعديل كوبون', coupon_delete: 'حذف كوبون', usd_reprice: 'تحديث الأسعار حسب الدولار', order_status: 'تغيير حالة طلب', product_create: 'إضافة منتج', product_update: 'تعديل منتج', product_delete: 'حذف منتج', category_create: 'إضافة قسم', category_delete: 'حذف قسم', banner_delete: 'حذف بانر', user_update: 'تعديل زبون', settings_update: 'تعديل الإعدادات', backup_download: 'تنزيل نسخة احتياطية', '2fa_enabled': 'تفعيل التحقق بخطوتين', '2fa_disabled': 'إيقاف التحقق بخطوتين' };
     c.innerHTML = `
       <div class="card panel" id="tfaPanel"><h3>🔐 التحقق بخطوتين لحسابك</h3>
         ${me.user.totp_enabled ? `<p><span class="st delivered">مفعّل ✓</span> عند الدخول يُطلب رمز من تطبيق Authenticator.</p>
@@ -948,7 +998,20 @@
         <td class="order-items">${Object.entries(t.answers).map(([q, a]) => `${esc((TI_Q[q] || [q])[0])}: <b>${esc((TI_Q[q] || [0, {}])[1][a] || a)}</b>`).join('<br>')}</td>
         <td class="num"><b>${fmt(t.estimate)}</b>${t.final_value != null && t.final_value !== t.estimate ? `<br><span style="color:var(--brand)">النهائي ${fmt(t.final_value)}</span>` : ''}</td>
         <td><span class="st ${t.status === 'pending' ? 'pending' : t.status === 'rejected' || t.status === 'cancelled' ? 'cancelled' : 'delivered'}">${esc(TI_ST[t.status] || t.status)}</span></td>
-        <td>${t.status === 'pending' ? `<div class="row-actions"><button class="sm-btn primary" data-ti="${t.id}" data-act="accepted">قبول</button><button class="sm-btn" data-ti="${t.id}" data-act="adjusted">تعديل السعر</button><button class="sm-btn danger" data-ti="${t.id}" data-act="rejected">رفض</button></div>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">لا توجد طلبات تبديل بعد</p>'}</div>`;
+        <td>${t.status === 'pending' ? `<div class="row-actions"><button class="sm-btn primary" data-ti="${t.id}" data-act="accepted">قبول</button><button class="sm-btn" data-ti="${t.id}" data-act="adjusted">تعديل السعر</button><button class="sm-btn danger" data-ti="${t.id}" data-act="rejected">رفض</button></div>` : ''}${['accepted', 'adjusted'].includes(t.status) ? (t.listed_product_id ? `<button class="sm-btn" data-edit-listed="${t.listed_product_id}">♻️ فتح المنتج المستعمل #${t.listed_product_id}</button>` : `<button class="sm-btn primary" data-list-used="${t.id}">♻️ اعرضه كموبايل مستعمل</button>`) : ''}</td></tr>`).join('')}</table>` : '<p class="muted">لا توجد طلبات تبديل بعد</p>'}</div>`;
+    c.querySelectorAll('[data-list-used]').forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api(`/admin/tradeins/${b.dataset.listUsed}/list-used`, { method: 'POST' });
+        toast('تم إنشاء مسودة مستعمل — كمّل الصور والسعر وفعّلها');
+        if (!tagsCache.length) tagsCache = await api('/admin/tags').catch(() => []);
+        productForm(r.product, () => tradein());
+      } catch (err) { toast(err.message); b.disabled = false; }
+    });
+    c.querySelectorAll('[data-edit-listed]').forEach((b) => b.onclick = async () => {
+      try { const list2 = await api('/admin/products'); const pr = list2.find((x) => x.id === Number(b.dataset.editListed)); if (pr) productForm(pr, () => tradein()); else toast('المنتج محذوف'); }
+      catch (err) { toast(err.message); }
+    });
     c.querySelectorAll('[data-ti]').forEach((b) => b.onclick = () => {
       const t = list.find((x) => x.id === Number(b.dataset.ti)); const act = b.dataset.act;
       modal(`${act === 'accepted' ? 'قبول' : act === 'adjusted' ? 'تعديل سعر' : 'رفض'} — ${esc(t.label)}`, `<form id="tif">
@@ -1148,7 +1211,7 @@
   }
 
   // ---------- stock movements ----------
-  const REASONS = { order: '🛒 طلب', cancel: '↩️ إلغاء طلب', admin_edit: '✏️ تعديل المنتج', restock: '📦 بضاعة جديدة', return: '↩️ مرتجع', damage: '💥 تالف', correction: '🔧 تصحيح جرد', initial: '🆕 مخزون أولي' };
+  const REASONS = { order: '🛒 طلب', cancel: '↩️ إلغاء طلب', admin_edit: '✏️ تعديل المنتج', restock: '📦 بضاعة جديدة', return: '↩️ مرتجع', damage: '💥 تالف', correction: '🔧 تصحيح جرد', initial: '🆕 مخزون أولي', tradein: '♻️ جهاز من التبديل' };
   async function stock() {
     const c = layout('stock', 'حركة المخزن');
     const list = await api('/admin/stock');

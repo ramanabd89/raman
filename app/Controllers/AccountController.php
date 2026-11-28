@@ -11,7 +11,6 @@ use App\Models\AuditLog;
 use App\Models\Order;
 use App\Models\Setting;
 use App\Models\User;
-use App\Models\Wishlist;
 use App\Services\OtpiqService;
 use App\Services\TotpService;
 
@@ -83,8 +82,4 @@ final class AccountController extends Controller
     }
     public function deleteAddress(): array { Model::run('DELETE FROM addresses WHERE id = ? AND user_id = ?', [$this->id(), $this->uid()]); return ['ok' => true]; }
 
-    public function wishlist(): array { return ['ids' => Wishlist::ids($this->uid())]; }
-    public function wishlistMerge(): array { return ['ids' => Wishlist::merge($this->uid(), is_array($this->in('ids')) ? $this->in('ids') : [])]; }
-    public function wishlistAdd(): array { Wishlist::add($this->uid(), $this->id()); return ['ids' => Wishlist::ids($this->uid())]; }
-    public function wishlistRemove(): array { Wishlist::remove($this->uid(), $this->id()); return ['ids' => Wishlist::ids($this->uid())]; }
 }

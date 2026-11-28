@@ -10,6 +10,7 @@ use App\Controllers\RepairController as RepairC;
 use App\Controllers\ReviewController as ReviewC;
 use App\Controllers\StorefrontController as Store;
 use App\Controllers\TradeInController as TradeInC;
+use App\Controllers\WishlistController as Wish;
 use App\Core\Router;
 use App\Middleware\AuthMiddleware as Signed;
 use App\Middleware\CsrfMiddleware as Csrf;
@@ -29,6 +30,9 @@ $r->get('/api/banners', [Store::class, 'banners']);
 $r->get('/api/faqs', [Store::class, 'faqs']);
 $r->get('/api/products', [Store::class, 'products']);
 $r->get('/api/products/facets', [Store::class, 'facets']);
+$r->get('/api/search/suggest', [Store::class, 'suggest']);
+$r->get('/api/accessories/models', [Finder::class, 'accessoryModels']);
+$r->get('/api/accessories/by-model', [Finder::class, 'accessoriesByModel']);
 $r->get('/api/products/:id', [Store::class, 'product']);
 $r->post('/api/track', [Store::class, 'track'], [Csrf::class]);
 
@@ -50,16 +54,16 @@ $r->post('/api/me/2fa/disable', [Account::class, 'totpDisable'], $U);
 $r->get('/api/me/addresses', [Account::class, 'addresses'], [Signed::class]);
 $r->post('/api/me/addresses', [Account::class, 'addAddress'], $U);
 $r->delete('/api/me/addresses/:id', [Account::class, 'deleteAddress'], $U);
-$r->get('/api/me/wishlist', [Account::class, 'wishlist'], [Signed::class]);
-$r->post('/api/me/wishlist', [Account::class, 'wishlistMerge'], $U);
-$r->put('/api/me/wishlist/:id', [Account::class, 'wishlistAdd'], $U);
-$r->delete('/api/me/wishlist/:id', [Account::class, 'wishlistRemove'], $U);
+$r->get('/api/wishlist', [Wish::class, 'list'], [Signed::class]);
+$r->post('/api/wishlist/toggle', [Wish::class, 'toggle'], $U);
+$r->post('/api/wishlist/merge', [Wish::class, 'merge'], $U);
 $r->get('/api/me/to-review', [ReviewC::class, 'toReview'], [Signed::class]);
 
 // ---------- cart & orders ----------
 $r->post('/api/cart/quote', [CartOrder::class, 'quote'], [Csrf::class]);
 $r->post('/api/coupons/check', [CartOrder::class, 'checkCoupon'], [Csrf::class]);
 $r->post('/api/cart/sync', [CartOrder::class, 'sync'], $U);
+$r->post('/api/cart/merge', [CartOrder::class, 'merge'], $U);
 $r->post('/api/orders', [CartOrder::class, 'place'], [Csrf::class, Signed::class, Maint::class]);
 $r->get('/api/orders', [CartOrder::class, 'list'], [Signed::class]);
 $r->get('/api/orders/:id', [CartOrder::class, 'show'], [Signed::class]);
@@ -139,6 +143,8 @@ $r->get('/api/admin/settings', [Admin\SettingController::class, 'show'], $A);
 $r->put('/api/admin/settings', [Admin\SettingController::class, 'update'], $AW);
 $r->post('/api/admin/settings/test-otp', [Admin\SettingController::class, 'testOtp'], $AW);
 $r->post('/api/admin/settings/test-telegram', [Admin\SettingController::class, 'testTelegram'], $AW);
+$r->get('/api/admin/cache', [Admin\SettingController::class, 'cache'], $A);
+$r->post('/api/admin/cache/clear', [Admin\SettingController::class, 'clearCache'], $AW);
 
 $r->get('/api/admin/profit', [Admin\ReportController::class, 'profit'], $A);
 $r->get('/api/admin/expenses', [Admin\ReportController::class, 'expenses'], $A);
@@ -153,6 +159,7 @@ $r->delete('/api/admin/tradein-models/:id', [Admin\TradeInController::class, 'de
 $r->put('/api/admin/tradein-rules', [Admin\TradeInController::class, 'rules'], $AW);
 $r->get('/api/admin/tradeins', [Admin\TradeInController::class, 'list'], $A);
 $r->put('/api/admin/tradeins/:id', [Admin\TradeInController::class, 'review'], $AW);
+$r->post('/api/admin/tradeins/:id/list-used', [Admin\TradeInController::class, 'listUsed'], $AW);
 
 $r->get('/api/admin/repairs', [Admin\RepairController::class, 'list'], $A);
 $r->post('/api/admin/repairs/:id/comments', [Admin\RepairController::class, 'comment'], $AW);

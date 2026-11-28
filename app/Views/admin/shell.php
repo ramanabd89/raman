@@ -10,14 +10,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" href="<?= e(path('favicon.svg')) ?>" type="image/svg+xml">
-  <link rel="stylesheet" href="<?= e(path('css/style.css')) ?>">
-  <link rel="stylesheet" href="<?= e(path('admin/admin.css')) ?>">
+  <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>">
+  <link rel="stylesheet" href="<?= e(asset('admin/admin.css')) ?>">
 </head>
 <body>
   <div id="root"></div>
   <div class="toast" id="toast"></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
-  <script src="<?= e(path('admin/i18n.js')) ?>"></script>
-  <script src="<?= e(path('admin/admin.js')) ?>"></script>
+  <script src="<?= e(asset('admin/i18n.js')) ?>"></script>
+  <script src="<?= e(asset('admin/admin.js')) ?>"></script>
 </body>
 </html>

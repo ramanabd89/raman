@@ -5,9 +5,10 @@ use App\Config\Config;
 use App\Controllers\SeoController;
 use App\Models\Setting;
 use App\Services\BackupService;
+use App\Services\CacheService;
 use Throwable;
 
-/** Request lifecycle: install check → headers → language → session → API router or server-rendered page. */
+/** Request lifecycle: install check → headers → schema upgrade → language → session → API router or server-rendered page. */
 final class Kernel
 {
     public static function run(): void
@@ -16,6 +17,7 @@ final class Kernel
         Response::securityHeaders();
         $isApi = strncmp(Url::requestPath(), '/api/', 5) === 0;
         try {
+            Migrator::run();
             Lang::set(Lang::detect(Setting::get('default_lang', 'ku')));
             $req = new Request();
             Auth::load($req);
@@ -23,7 +25,9 @@ final class Kernel
             BackupService::housekeeping();
             if ($isApi) {
                 $router = require APP . '/routes.php';
-                Response::json($router->dispatch($req));
+                $data = $router->dispatch($req);
+                CacheService::afterWrite($req->method, $req->path); // drop cached catalogue/settings the change made stale
+                Response::json($data);
             }
             (new SeoController($req))->handle();
         } catch (HttpException $e) {

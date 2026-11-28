@@ -35,6 +35,14 @@ final class TradeInController extends Controller
         return ['rules' => $out, 'enabled' => Setting::on('tradein_enabled')];
     }
     public function list(): array { return TradeIn::adminList(); }
+
+    /** "List as used phone": accepted trade-in → hidden draft product to finish in the product form. */
+    public function listUsed(): array
+    {
+        $pid = TradeIn::listAsUsed($this->id());
+        AuditLog::add($this->req, 'tradein_list_used', ['tradein' => $this->id(), 'product' => $pid]);
+        return ['product_id' => $pid, 'product' => \App\Models\Product::adminOne($pid)];
+    }
     public function review(): array
     {
         $r = TradeIn::review($this->id(), (string)$this->in('status', ''), $this->in('final_value'), tostr($this->in('imei', ''), 20), tostr($this->in('note', ''), 300));

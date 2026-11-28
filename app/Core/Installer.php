@@ -17,7 +17,8 @@ final class Installer
             'curl' => extension_loaded('curl'),
             'mbstring' => extension_loaded('mbstring'),
             'uploads' => is_writable(ROOT . '/uploads'),
-            'storage' => is_writable(ROOT . '/storage') && (is_writable(ROOT . '/storage/backups') || !is_dir(ROOT . '/storage/backups')),
+            'storage' => is_writable(ROOT . '/storage') && (is_writable(ROOT . '/storage/backups') || !is_dir(ROOT . '/storage/backups'))
+                && (is_writable(ROOT . '/storage/cache') || !is_dir(ROOT . '/storage/cache')),
             'config' => is_writable(ROOT),
         ];
     }
@@ -41,6 +42,7 @@ final class Installer
         if (!empty($in['store_name'])) $set->execute(['store_name', $in['store_name']]);
         if (in_array($in['default_lang'] ?? '', Lang::LANGS, true)) $set->execute(['default_lang', $in['default_lang']]);
         $set->execute(['analytics_secret', rand_hex(16)]);
+        $set->execute(['schema_version', (string)Migrator::VERSION]);
         $config = ['db_host' => $in['db_host'], 'db_port' => $in['db_port'] ?? '3306', 'db_name' => $in['db_name'], 'db_user' => $in['db_user'], 'db_pass' => $in['db_pass'],
             'admin_path' => $in['admin_path'], 'public_url' => '', 'env' => $in['env'] ?? 'production'];
         $php = "<?php\n// Written by install.php on " . gmdate('Y-m-d H:i') . " UTC. Keep it private (database password).\n"
@@ -48,6 +50,7 @@ final class Installer
         if (file_put_contents(ROOT . '/config.php', $php, LOCK_EX) === false) throw new RuntimeException('config_write');
         @chmod(ROOT . '/config.php', 0640);
         Product::rebuildIndex();
+        \App\Services\CacheService::clear();
         return $config;
     }
 }

@@ -35,6 +35,9 @@ final class CartOrderController extends Controller
 
     public function sync(): array { Cart::sync($this->uid(), $this->in('items', [])); return ['ok' => true]; }
 
+    /** Right after sign-in: the guest cart joins the account's saved cart (quantities added, capped to stock). */
+    public function merge(): array { return Cart::merge($this->uid(), $this->in('items', [])); }
+
     public function place(): array { return Order::place($this->user(), $this->req->body); }
 
     public function list(): array

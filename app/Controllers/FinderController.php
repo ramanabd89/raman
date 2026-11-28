@@ -3,10 +3,23 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Models\Product;
+use App\Services\AccessoryService;
 
-/** "Help me choose": scores in-stock phones by budget, OS, storage and what the customer uses the phone for. */
+/**
+ * "Help me choose": scores in-stock phones by budget, OS, storage and what the customer uses the phone for.
+ * "Accessories for my phone": phone models list + accessories that fit one model.
+ */
 final class FinderController extends Controller
 {
+    public function accessoryModels(): array { return AccessoryService::models(); }
+
+    public function accessoriesByModel(): array
+    {
+        $cat = (string)$this->qs('category', '');
+        $type = in_array($cat, AccessoryService::TYPES, true) ? $cat : (in_array($this->qs('type', ''), AccessoryService::TYPES, true) ? (string)$this->qs('type') : '');
+        return AccessoryService::byModel((string)$this->qs('brand', ''), (string)$this->qs('model', ''), $type, ctype_digit($cat) ? (int)$cat : 0);
+    }
+
     private const USES = ['camera', 'battery', 'gaming', 'social', 'basic'];
     private const TIER = ['flagship' => 1, 'upper' => 0.75, 'mid' => 0.5, 'entry' => 0.25];
 

@@ -56,6 +56,39 @@ final class TradeIn extends Model
         return array_map(function ($t) { $t['answers'] = obj(parse_json($t['answers'] ?: '{}', [])); return $t; },
             self::all('SELECT t.*, o.status order_status, o.customer_name, o.phone, o.city, o.total order_total FROM tradeins t LEFT JOIN orders o ON o.id = t.order_id ORDER BY t.id DESC LIMIT 300'));
     }
+    /**
+     * An accepted trade-in becomes a hidden draft "used phone" product (brand/model/storage, grade and box from the answers,
+     * price = trade-in value + 20% rounded to 5,000 IQD) for the owner to check, photograph and publish.
+     */
+    public static function listAsUsed(int $id): int
+    {
+        $t = self::one('SELECT t.*, m.brand, m.model, m.storage_gb FROM tradeins t LEFT JOIN tradein_models m ON m.id = t.model_id WHERE t.id = ?', [$id]);
+        if (!$t) throw new HttpException(404, 'not_found');
+        if (!in_array($t['status'], ['accepted', 'adjusted'], true)) throw new HttpException(422, 'tradein_not_accepted');
+        if ($t['listed_product_id'] && self::one('SELECT 1 FROM products WHERE id = ?', [$t['listed_product_id']])) return (int)$t['listed_product_id'];
+        $a = parse_json($t['answers'] ?: '{}', []);
+        $grade = ($a['screen'] ?? '') === 'cracked' || ($a['body'] ?? '') === 'damaged' || ($a['works'] ?? '') === 'no' ? 'C'
+            : (($a['screen'] ?? '') === 'scratches' || ($a['body'] ?? '') === 'scratches' ? 'B' : (($a['battery'] ?? '') === 'good' ? 'A+' : 'A'));
+        $battery = ['good' => 88, 'ok' => 82, 'weak' => 76][$a['battery'] ?? ''] ?? null;
+        $brand = (string)($t['brand'] ?? ''); $model = (string)($t['model'] ?? ''); $gb = (int)($t['storage_gb'] ?? 0);
+        $name = trim($model !== '' ? ($brand !== '' && stripos($model, $brand) === false && $brand !== 'Apple' ? "$brand $model" : $model) . ($gb ? " {$gb}GB" : '') : $t['label']);
+        $value = (int)($t['final_value'] ?: $t['estimate']);
+        $price = max(5000, (int)(ceil($value * 1.2 / 5000) * 5000));
+        $os = stripos($brand . $model, 'iphone') !== false || strcasecmp($brand, 'Apple') === 0 ? 'ios' : 'android';
+        $cat = self::val("SELECT p.category_id FROM products p WHERE JSON_EXTRACT(p.attrs, '$.os') IS NOT NULL AND p.category_id IS NOT NULL GROUP BY p.category_id ORDER BY COUNT(*) DESC LIMIT 1");
+        return self::tx(function () use ($t, $name, $brand, $price, $value, $grade, $battery, $a, $gb, $os, $cat) {
+            self::run('INSERT INTO products(category_id, name_ku, name_ar, name_en, brand, price, stock, active, cost_price, attrs, is_used, condition_grade, battery_health, has_box, has_charger, used_warranty_days, created_at)
+                VALUES(?,?,?,?,?,?,1,0,?,?,1,?,?,?,?,30,UTC_TIMESTAMP())',
+                [$cat ?: null, $name, $name, $name, $brand ?: null, $price, $value, json_enc(['os' => $os, 'tier' => 'mid', 'storage' => $gb]), $grade, $battery,
+                    ($a['box'] ?? '') === 'yes' ? 1 : 0, ($a['box'] ?? '') === 'yes' ? 1 : 0]);
+            $pid = self::lastId();
+            self::run('UPDATE tradeins SET listed_product_id = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', [$pid, $t['id']]);
+            Product::index($pid);
+            StockMovement::record($pid, null, 1, 'tradein', 'tradein #' . $t['id']);
+            return $pid;
+        });
+    }
+
     /** accepted / adjusted / rejected after inspection; the order total follows. Credit never exceeds what the products cost. */
     public static function review(int $id, string $status, $finalValue, string $imei, string $note): array
     {

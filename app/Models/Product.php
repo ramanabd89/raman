@@ -10,7 +10,11 @@ final class Product extends Model
 {
     public const VARIANT_COUNT = '(SELECT COUNT(*) FROM product_variants v WHERE v.product_id = p.id) AS variant_count';
     public const FIELDS = ['category_id', 'name_ku', 'name_ar', 'name_en', 'desc_ku', 'desc_ar', 'desc_en', 'brand', 'price', 'old_price', 'stock', 'image', 'images',
-        'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids', 'attrs', 'video_url', 'slug'];
+        'featured', 'trending', 'flash_sale', 'active', 'usd_priced', 'price_usd', 'old_price_usd', 'cost_price', 'specs', 'bundle_ids', 'attrs', 'video_url', 'slug',
+        'is_used', 'condition_grade', 'battery_health', 'has_box', 'has_charger', 'used_warranty_days', 'cosmetic_notes_ku', 'cosmetic_notes_ar', 'cosmetic_notes_en', 'model_code'];
+    public const GRADES = ['A+', 'A', 'B', 'C'];
+    /** Heavy fields left out of grids, search suggestions and other lists (the product page loads them). */
+    private const HEAVY = ['desc_ku', 'desc_ar', 'desc_en', 'specs', 'images', 'cosmetic_notes_ku', 'cosmetic_notes_ar', 'cosmetic_notes_en', 'video_url', 'bundle_ids', 'search_text'];
 
     // ---------------- output ----------------
     public static function out(?array $p, bool $admin = false): ?array
@@ -20,11 +24,19 @@ final class Product extends Model
         $p['specs'] = parse_json($p['specs'] ?? '[]', []);
         $p['bundle_ids'] = parse_json($p['bundle_ids'] ?? '[]', []);
         $p['attrs'] = obj(parse_json($p['attrs'] ?? '{}', []));
-        foreach (['featured', 'trending', 'flash_sale', 'active'] as $k) $p[$k] = (bool)($p[$k] ?? 0);
+        foreach (['featured', 'trending', 'flash_sale', 'active', 'is_used', 'has_box', 'has_charger'] as $k) $p[$k] = (bool)($p[$k] ?? 0);
+        if (empty($p['is_used'])) { $p['condition_grade'] = null; $p['battery_health'] = null; $p['used_warranty_days'] = 0; }
         $p['has_variants'] = ($p['variant_count'] ?? 0) > 0;
         if (!$p['slug']) $p['slug'] = self::slugFor($p);
         if (!$admin) unset($p['cost_price'], $p['search_text'], $p['bundle_ids'], $p['usd_priced'], $p['price_usd'], $p['old_price_usd']);
         return $p;
+    }
+    /** List/grid output: same as out() without the heavy text fields. */
+    public static function slim(array $p): array
+    {
+        $o = self::out($p);
+        foreach (self::HEAVY as $k) unset($o[$k]);
+        return $o;
     }
     public static function attrs(array $p): array { $a = $p['attrs'] ?? '{}'; return is_array($a) ? $a : (is_object($a) ? (array)$a : parse_json($a, [])); }
     public static function isPhone(array $p): bool { return !empty(self::attrs($p)['os']); }
@@ -50,6 +62,9 @@ final class Product extends Model
         }
         if (!empty($q['flash'])) $w[] = 'p.flash_sale = 1';
         if (!empty($q['featured'])) $w[] = 'p.featured = 1';
+        if (($q['used'] ?? '') === '1') $w[] = 'p.is_used = 1';
+        if (($q['used'] ?? '') === '0') $w[] = 'p.is_used = 0';
+        if (!empty($q['grade']) && in_array($q['grade'], self::GRADES, true)) { $w[] = 'p.condition_grade = ?'; $p[] = $q['grade']; }
         if (($q['phones'] ?? '') === '1') $w[] = "JSON_EXTRACT(p.attrs, '$.os') IS NOT NULL";
         if (!empty($q['ids'])) {
             $ids = array_slice(array_values(array_filter(array_map('toint', explode(',', (string)$q['ids'])), fn($x) => $x > 0)), 0, 60);
@@ -83,13 +98,13 @@ final class Product extends Model
             foreach ($rows as &$r) unset($r['_rel'], $r['_i']); unset($r);
         }
         if (!empty($q['ids'])) { $order = array_map('toint', explode(',', (string)$q['ids'])); usort($rows, fn($a, $b) => array_search($a['id'], $order) <=> array_search($b['id'], $order)); }
-        return array_map(fn($p) => self::out($p, $admin), $rows);
+        return array_map(fn($p) => $admin ? self::out($p, true) : self::slim($p), $rows);
     }
 
     /** Filter options computed in SQL over ALL matching products (category / search), not a sample. */
     public static function facets(array $q): array
     {
-        [$where, $params] = self::where(['category' => $q['category'] ?? null, 'q' => $q['q'] ?? null], false, false);
+        [$where, $params] = self::where(['category' => $q['category'] ?? null, 'q' => $q['q'] ?? null, 'used' => $q['used'] ?? null], false, false);
         $brands = self::all("SELECT TRIM(p.brand) v, COUNT(*) n FROM products p $where" . ($where ? ' AND' : ' WHERE') . " p.brand IS NOT NULL AND TRIM(p.brand) != '' GROUP BY TRIM(p.brand) ORDER BY n DESC, v", $params);
         $attr = function (string $k) use ($where, $params) {
             $rows = self::all("SELECT CAST(JSON_EXTRACT(p.attrs, '$.$k') AS DECIMAL(10,2)) v, COUNT(*) n FROM products p $where" . ($where ? ' AND' : ' WHERE')
@@ -104,7 +119,7 @@ final class Product extends Model
     public static function related(array $p): array
     {
         if (!$p['category_id']) return [];
-        return array_map([self::class, 'out'], self::all('SELECT p.*, ' . self::VARIANT_COUNT . ' FROM products p WHERE p.active = 1 AND p.category_id = ? AND p.id != ? ORDER BY p.sold DESC LIMIT 8', [$p['category_id'], $p['id']]));
+        return array_map([self::class, 'slim'], self::all('SELECT p.*, ' . self::VARIANT_COUNT . ' FROM products p WHERE p.active = 1 AND p.category_id = ? AND p.id != ? ORDER BY p.is_used = ? DESC, p.sold DESC LIMIT 8', [$p['category_id'], $p['id'], (int)($p['is_used'] ?? 0)]));
     }
 
     // ---------------- variants / tags ----------------
@@ -129,14 +144,7 @@ final class Product extends Model
     }
 
     // ---------------- search index + slugs ----------------
-    public static function index(int $id): void
-    {
-        $p = self::one('SELECT p.name_ku, p.name_ar, p.name_en, p.brand, c.name_ku ck, c.name_ar ca, c.name_en ce FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [$id]);
-        if (!$p) return;
-        $labels = array_column(self::all('SELECT label FROM product_variants WHERE product_id = ?', [$id]), 'label');
-        $slug = slugify($p['name_en'] ?? '') ?: slugify($p['brand'] ?? '');
-        self::run('UPDATE products SET search_text = ?, slug = ? WHERE id = ?', [' ' . SearchService::normalize(implode(' ', array_filter(array_merge(array_values($p), $labels)))) . ' ', $slug ?: null, $id]);
-    }
+    public static function index(int $id): void { SearchService::indexProduct($id); }
     public static function rebuildIndex(): void
     {
         foreach (self::all('SELECT id FROM products') as $r) self::index((int)$r['id']);
@@ -163,7 +171,12 @@ final class Product extends Model
     }
 
     // ---------------- accessory compatibility ----------------
-    private const FAMILIES = ['iphone', 'galaxy', 'redmi', 'poco', 'pixel', 'honor', 'infinix', 'tecno', 'huawei'];
+    private const FAMILIES = ['iphone', 'galaxy', 'redmi', 'poco', 'xiaomi', 'pixel', 'honor', 'infinix', 'tecno', 'huawei', 'oppo', 'realme', 'vivo', 'nothing'];
+    /** family → brand shown to customers */
+    public const FAMILY_BRAND = ['iphone' => 'Apple', 'galaxy' => 'Samsung', 'redmi' => 'Xiaomi', 'poco' => 'Xiaomi', 'xiaomi' => 'Xiaomi', 'pixel' => 'Google',
+        'honor' => 'Honor', 'infinix' => 'Infinix', 'tecno' => 'Tecno', 'huawei' => 'Huawei', 'oppo' => 'Oppo', 'realme' => 'Realme', 'vivo' => 'Vivo', 'nothing' => 'Nothing'];
+    /** brand typed without the family word ("Samsung S24 Ultra") → the family word */
+    private const BRAND_FAMILY = ['apple' => 'iphone', 'samsung' => 'galaxy', 'google' => 'pixel'];
     private const MODIFIERS = ['pro', 'max', 'plus', 'ultra', 'mini', 'lite', 'fe', 'edge'];
     /** family + model number + modifiers from a name: "iPhone 16 Pro Max" → iphone / 16 / max+pro */
     public static function modelSig(string $text): ?array
@@ -176,11 +189,48 @@ final class Product extends Model
         if ($fi < 0) return null;
         $rest = array_slice($w, $fi + 1, 5);
         $ni = -1; foreach ($rest as $i => $x) if (preg_match('/^\d{1,3}$/', $x)) { $ni = $i; break; }
-        $series = $ni > 0 && preg_match('/^[a-z]$/', $rest[$ni - 1]) ? $rest[$ni - 1] : '';
+        $series = $ni > 0 && (preg_match('/^[a-z]$/', $rest[$ni - 1]) || $rest[$ni - 1] === 'note') ? $rest[$ni - 1] : '';
         $mods = array_values(array_filter(array_slice($rest, $ni >= 0 ? $ni + 1 : 0), fn($x) => in_array($x, self::MODIFIERS, true)));
         sort($mods);
         return ['family' => $w[$fi], 'model' => $series . ($ni >= 0 ? $rest[$ni] : ''), 'mods' => implode('+', $mods)];
     }
+    /** "Samsung" + "S24 Ultra" → "galaxy|s24|ultra" (the same key whatever the spelling or language); falls back to the normalized text. */
+    public static function modelKey(string $brand, string $model): string
+    {
+        $text = trim($brand . ' ' . $model);
+        $sig = self::modelSig($text);
+        if (!$sig) { $fam = self::BRAND_FAMILY[mb_strtolower(trim($brand))] ?? null; if ($fam) $sig = self::modelSig("$fam $model"); }
+        if ($sig && $sig['model'] !== '') return mb_substr("{$sig['family']}|{$sig['model']}|{$sig['mods']}", 0, 120);
+        return mb_substr(SearchService::normalize($text), 0, 120);
+    }
+    /** Model name of a phone product without storage/colour: "iPhone 15 Pro Max 256GB Black" → "iPhone 15 Pro Max" */
+    public static function phoneModelName(array $p): string
+    {
+        $n = (string)($p['name_en'] ?: $p['name_ku']);
+        $n = preg_replace('/\b\d+\s*(GB|TB)\b.*$/i', '', $n);
+        $n = preg_replace('/\s*[\(\[].*$/', '', $n);
+        return trim(preg_replace('/\s+/', ' ', $n));
+    }
+
+    // ---------------- explicit accessory compatibility ----------------
+    public static function compat(int $pid): array { return array_column(self::all('SELECT label FROM product_compatibility WHERE product_id = ? ORDER BY label', [$pid]), 'label'); }
+    public static function saveCompat(int $pid, array $labels): void
+    {
+        self::run('DELETE FROM product_compatibility WHERE product_id = ?', [$pid]);
+        foreach ($labels as $l) {
+            [$brand, $model] = self::splitBrand($l);
+            self::run('INSERT IGNORE INTO product_compatibility(product_id, model_key, label) VALUES(?,?,?)', [$pid, self::modelKey($brand, $model), $l]);
+        }
+    }
+    /** "Samsung Galaxy S24 Ultra" → ["Samsung", "Galaxy S24 Ultra"]; "iPhone 15" → ["Apple", "iPhone 15"] */
+    public static function splitBrand(string $label): array
+    {
+        $sig = self::modelSig($label);
+        $first = mb_strtolower(strtok($label, ' ') ?: '');
+        foreach (self::FAMILY_BRAND as $fam => $brand) if ($first === mb_strtolower($brand) && $first !== $fam) return [$brand, trim(mb_substr($label, mb_strlen($first)))];
+        return [$sig ? self::FAMILY_BRAND[$sig['family']] : '', $label];
+    }
+
     private static function names(array $x): string { return implode(' ', array_filter([$x['name_en'] ?? '', $x['name_ar'] ?? '', $x['name_ku'] ?? ''])); }
     /** No iPhone case on a Galaxy, no Lightning cable on a USB-C iPhone. */
     public static function fits(array $phone, array $acc): bool
@@ -228,7 +278,7 @@ final class Product extends Model
             foreach ($more as $x) if ($fits($x) && !($isPhone && self::isPhone($x)) && !$has($list, $x)) $list[] = $x;
         }
         $list = array_values(array_filter($list, fn($x) => $x['id'] !== $p['id']));
-        return array_map([self::class, 'out'], array_slice($list, 0, 4));
+        return array_map([self::class, 'slim'], array_slice($list, 0, 4));
     }
 
     /** Real numbers only: people viewing in the last 15 minutes, units sold in the last 30 days. */
@@ -269,6 +319,22 @@ final class Product extends Model
             'attrs' => json_enc(obj(self::cleanAttrs($b['attrs'] ?? null))),
             'video_url' => preg_match('#^(https://[^\s"\'<>]+|/uploads/[\w.-]+)$#', tostr($b['video_url'] ?? '', 500)) ? tostr($b['video_url'], 500) : null,
         ];
+        $used = !empty($b['is_used']) && !$off($b['is_used']);
+        $v['is_used'] = $used ? 1 : 0;
+        $v['condition_grade'] = $used && in_array($b['condition_grade'] ?? '', self::GRADES, true) ? $b['condition_grade'] : null;
+        $v['battery_health'] = $used && isset($b['battery_health']) && $b['battery_health'] !== '' ? max(1, min(100, toint($b['battery_health']))) : null;
+        $v['has_box'] = $used && !empty($b['has_box']) && !$off($b['has_box']) ? 1 : 0;
+        $v['has_charger'] = $used && !empty($b['has_charger']) && !$off($b['has_charger']) ? 1 : 0;
+        $v['used_warranty_days'] = $used ? max(0, min(730, toint($b['used_warranty_days'] ?? 0))) : 0;
+        foreach (['ku', 'ar', 'en'] as $l) $v["cosmetic_notes_$l"] = $used ? (tostr($b["cosmetic_notes_$l"] ?? '', 1000) ?: null) : null;
+        if ($used && !$v['condition_grade']) throw new HttpException(422, 'invalid_input', ['fields' => ['condition_grade']]);
+        $code = strtoupper(preg_replace('/[^A-Za-z0-9\- \/]/', '', tostr($b['model_code'] ?? '', 60)));
+        $v['model_code'] = trim($code) !== '' ? trim($code) : null;
+        $v['compatible_models'] = [];
+        foreach (array_slice(is_array($b['compatible_models'] ?? null) ? $b['compatible_models'] : [], 0, 40) as $m) {
+            $m = trim(preg_replace('/\s+/u', ' ', tostr($m, 120)));
+            if ($m !== '' && !in_array(mb_strtolower($m), array_map('mb_strtolower', $v['compatible_models']), true)) $v['compatible_models'][] = $m;
+        }
         $v['slug'] = slugify($v['name_en']) ?: (slugify($v['brand']) ?: null);
         $v['tag_ids'] = array_slice(array_values(array_filter(array_map('toint', is_array($b['tag_ids'] ?? null) ? $b['tag_ids'] : []), fn($x) => $x > 0)), 0, 10);
         $usd = fn($x) => max(0, round(num($x) * 100) / 100);
@@ -320,6 +386,7 @@ final class Product extends Model
         $min = Setting::int('min_profit');
         foreach ($list as &$p) {
             $p['tag_ids'] = array_map('intval', array_column(self::all('SELECT tag_id FROM product_tags WHERE product_id = ?', [$p['id']]), 'tag_id'));
+            $p['compatible_models'] = self::compat((int)$p['id']);
             $pairs = !empty($p['variants']) ? array_map(fn($v) => [$v['price'], $v['cost_price'] ?? $p['cost_price']], $p['variants']) : [[$p['price'], $p['cost_price']]];
             $p['low_margin'] = false; foreach ($pairs as [$pr, $c]) if ($c !== null && $pr - $c < $min) $p['low_margin'] = true;
         }

@@ -12,6 +12,14 @@ function e($s): string { return htmlspecialchars((string)($s ?? ''), ENT_QUOTES 
 function url(string $path = ''): string { return Url::to($path); }
 /** Path (no domain) for a path relative to the install folder: path('css/style.css') → /sub/css/style.css */
 function path(string $p = ''): string { return Url::base() . ltrim($p, '/'); }
+/** Static file URL with a version from its modification time: browsers keep it for a year and fetch the new one after an update. */
+function asset(string $p): string { $f = ROOT . '/' . ltrim($p, '/'); return path($p) . (is_file($f) ? '?v=' . base_convert((string)filemtime($f), 10, 36) : ''); }
+/** "Used · A+ · 🔋 94%" for a used product, '' otherwise */
+function used_badge(array $p): string
+{
+    if (empty($p['is_used'])) return '';
+    return implode(' · ', array_filter([__('used.badge'), !empty($p['condition_grade']) ? __('used.grade') . ' ' . $p['condition_grade'] : '', !empty($p['battery_health']) ? '🔋 ' . (int)$p['battery_health'] . '%' : '']));
+}
 
 function toint($v, int $d = 0): int {
     if (is_int($v)) return $v;

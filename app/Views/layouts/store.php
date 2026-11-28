@@ -24,7 +24,7 @@ $store = Setting::get('store_name', 'RamanPhone');
   <link rel="icon" href="<?= e(path('favicon.svg')) ?>" type="image/svg+xml">
   <link rel="apple-touch-icon" href="<?= e(path('img/icon-192.png')) ?>">
   <link rel="manifest" href="<?= e(path('manifest.json')) ?>">
-  <link rel="stylesheet" href="<?= e(path('css/style.css')) ?>">
+  <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>">
 </head>
 <body>
   <header class="header">
@@ -35,6 +35,7 @@ $store = Setting::get('store_name', 'RamanPhone');
         <a href="<?= e(path($lang . '/repair')) ?>"><?= e(__('page.repair')) ?></a>
         <a href="<?= e(path($lang . '/tradein')) ?>"><?= e(__('page.tradein')) ?></a>
         <a href="<?= e(path($lang . '/finder')) ?>"><?= e(__('page.finder')) ?></a>
+        <a href="<?= e(path($lang . '/used')) ?>"><?= e(__('page.used')) ?></a>
         <a href="<?= e(path($lang . '/faq')) ?>"><?= e(__('page.faq')) ?></a>
       </nav>
       <div class="header-actions">
@@ -68,7 +69,7 @@ $store = Setting::get('store_name', 'RamanPhone');
   <aside class="drawer full" id="catDrawer"></aside>
   <div class="toast" id="toast"></div>
 
-  <script src="<?= e(path('js/i18n.js')) ?>"></script>
-  <script src="<?= e(path('js/app.js')) ?>"></script>
+  <script src="<?= e(asset('js/i18n.js')) ?>" defer></script>
+  <script src="<?= e(asset('js/app.js')) ?>" defer></script>
 </body>
 </html>

@@ -23,7 +23,7 @@ final class ProductController extends Controller
         $id = Model::tx(function () use ($v) {
             Model::run('INSERT INTO products(' . implode(',', Product::FIELDS) . ', created_at) VALUES(' . Model::marks(Product::FIELDS) . ', UTC_TIMESTAMP())', array_map(fn($f) => $v[$f], Product::FIELDS));
             $pid = Model::lastId();
-            Product::saveVariants($pid, $v['variants']); Product::saveTags($pid, $v['tag_ids']); Product::index($pid);
+            Product::saveVariants($pid, $v['variants']); Product::saveTags($pid, $v['tag_ids']); Product::saveCompat($pid, $v['compatible_models']); Product::index($pid);
             $stock = (int)Model::val('SELECT stock FROM products WHERE id = ?', [$pid]);
             if ($stock) StockMovement::record($pid, null, $stock, 'initial', null, $this->user()['name']);
             return $pid;
@@ -41,7 +41,7 @@ final class ProductController extends Controller
         $bv = []; foreach (Product::variants($id) as $x) $bv[$x['id']] = $x['stock'];
         Model::tx(function () use ($v, $id, $before, $bv) {
             Model::run('UPDATE products SET ' . implode(', ', array_map(fn($f) => "$f = ?", Product::FIELDS)) . ' WHERE id = ?', array_merge(array_map(fn($f) => $v[$f], Product::FIELDS), [$id]));
-            Product::saveVariants($id, $v['variants']); Product::saveTags($id, $v['tag_ids']); Product::index($id);
+            Product::saveVariants($id, $v['variants']); Product::saveTags($id, $v['tag_ids']); Product::saveCompat($id, $v['compatible_models']); Product::index($id);
             $after = Product::variants($id);
             if ($after) foreach ($after as $x) StockMovement::record($id, $x['id'], $x['stock'] - ($bv[$x['id']] ?? 0), 'admin_edit', null, $this->user()['name']);
             else StockMovement::record($id, null, $v['stock'] - $before['stock'], 'admin_edit', null, $this->user()['name']);

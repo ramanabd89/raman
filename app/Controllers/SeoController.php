@@ -17,6 +17,7 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\Repair;
 use App\Models\Setting;
+use App\Services\CacheService;
 use App\Services\ImageUploadService;
 use App\Services\SeoService;
 
@@ -29,7 +30,7 @@ final class SeoController extends Controller
 {
     /** Pages that exist only inside the app (cart, account…): rendered as the app shell, never indexed. */
     private const APP_ONLY = ['cart', 'checkout', 'profile', 'orders', 'order', 'addresses', 'edit-profile', 'support', 'quick', 'login', 'register', 'reset', 'repairs', 'compare', 'wishlist', 'search'];
-    private const STATIC = ['repair', 'tradein', 'finder', 'faq', 'warranty'];
+    private const STATIC = ['repair', 'tradein', 'finder', 'faq', 'warranty', 'accessories-finder'];
 
     public function handle(): never
     {
@@ -51,7 +52,7 @@ final class SeoController extends Controller
             $this->page(array_slice($parts, 1));
         }
         // a known page without a language prefix → the same page in the visitor's language
-        if ($first === 'product' || $first === 'category' || in_array($first, self::STATIC, true) || in_array($first, self::APP_ONLY, true)) {
+        if ($first === 'product' || $first === 'category' || $first === 'used' || in_array($first, self::STATIC, true) || in_array($first, self::APP_ONLY, true)) {
             $qs = $_SERVER['QUERY_STRING'] ?? '';
             Response::redirect(Url::base() . Lang::current() . $path . ($qs !== '' ? "?$qs" : ''), 301);
         }
@@ -70,7 +71,8 @@ final class SeoController extends Controller
 
         if ($seg === '') {
             $seo->jsonld = [SeoService::storeLd(), SeoService::websiteLd()];
-            $content = View::render('store/home', ['categories' => Category::tree(), 'products' => Product::list(['limit' => 24]), 'banners' => Banner::active()]);
+            $data = CacheService::remember('catalog', 'ssr:home', 300, fn() => ['categories' => Category::tree(), 'products' => Product::list(['limit' => 24]), 'used' => Product::list(['used' => '1', 'limit' => 8])]);
+            $content = View::render('store/home', $data + ['banners' => CacheService::remember('content', 'banners:active', 900, fn() => Banner::active())]);
         } elseif ($seg === 'product' && isset($p[1])) {
             $product = Product::find(toint($p[1]));
             if (!$product) self::errorPage(404);
@@ -87,6 +89,7 @@ final class SeoController extends Controller
             if ($cat) $crumbs[] = [SeoService::L($cat, 'name'), 'category/' . Category::urlKey($cat)];
             $crumbs[] = [$name, $seo->path];
             $seo->jsonld = [SeoService::productLd($product, $seo->path), SeoService::breadcrumbLd($crumbs)];
+            if ($product['is_used']) $seo->title = __('seo.used_product_title', ['name' => $name, 'grade' => $product['condition_grade'] ?? '', 'price' => iqd($product['price']), 'store' => $store]);
             $content = View::render('store/product', ['p' => $product, 'variants' => Product::variants((int)$product['id']), 'crumbs' => $crumbs, 'related' => Product::related($product)]);
         } elseif ($seg === 'category' && isset($p[1])) {
             $cat = Category::find(toint($p[1]));
@@ -101,6 +104,14 @@ final class SeoController extends Controller
             $crumbs = [$home, [$name, $seo->path]];
             $seo->jsonld = [SeoService::breadcrumbLd($crumbs)];
             $content = View::render('store/category', ['cat' => $cat, 'products' => Product::list(['category' => $cat['id'], 'limit' => 40]), 'crumbs' => $crumbs]);
+        } elseif ($seg === 'used' && count($p) === 1) {
+            $seo->path = 'used';
+            $seo->title = __('seo.used_title', ['store' => $store]);
+            $seo->description = __('seo.used_desc', ['store' => $store]);
+            $products = CacheService::remember('catalog', 'ssr:used', 300, fn() => Product::list(['used' => '1', 'limit' => 60]));
+            $crumbs = [$home, [__('page.used'), 'used']];
+            $seo->jsonld = [SeoService::usedListLd($products), SeoService::breadcrumbLd($crumbs)];
+            $content = View::render('store/used', ['products' => $products, 'crumbs' => $crumbs]);
         } elseif (in_array($seg, self::STATIC, true) && count($p) <= 2) {
             $seo->path = implode('/', $p);
             $seo->title = __("seo.{$seg}_title", ['store' => $store]);
@@ -145,8 +156,14 @@ final class SeoController extends Controller
 
     private function sitemap(): never
     {
+        Response::text(CacheService::remember('sitemap', 'sitemap.xml:' . Url::base(), 3600, fn() => $this->sitemapXml()), 'application/xml');
+    }
+
+    private function sitemapXml(): string
+    {
         $urls = []; // [path, lastmod]
         $urls[] = ['', null];
+        $urls[] = ['used', null];
         foreach (self::STATIC as $s) $urls[] = [$s, null];
         foreach (Model::all('SELECT id, slug, name_en FROM categories ORDER BY sort, id') as $c) $urls[] = ['category/' . Category::urlKey($c), null];
         foreach (Model::all('SELECT id, slug, name_en, brand, created_at FROM products WHERE active = 1 ORDER BY id') as $p) $urls[] = ['product/' . Product::urlKey($p), substr((string)$p['created_at'], 0, 10)];
@@ -157,7 +174,7 @@ final class SeoController extends Controller
             $x[] = '  </url>';
         }
         $x[] = '</urlset>';
-        Response::text(implode("\n", $x) . "\n", 'application/xml');
+        return implode("\n", $x) . "\n";
     }
 
     // ---------------- print views ----------------

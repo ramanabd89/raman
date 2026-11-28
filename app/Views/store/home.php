@@ -13,7 +13,13 @@ $l = Lang::current();
     <a href="<?= e(path("$l/repair")) ?>"><?= e(__('page.repair')) ?></a>
     <a href="<?= e(path("$l/tradein")) ?>"><?= e(__('page.tradein')) ?></a>
     <a href="<?= e(path("$l/finder")) ?>"><?= e(__('page.finder')) ?></a>
+    <a href="<?= e(path("$l/used")) ?>"><?= e(__('page.used')) ?></a>
+    <a href="<?= e(path("$l/accessories-finder")) ?>"><?= e(__('page.accessories-finder')) ?></a>
   </nav>
   <h2 class="section-title"><?= e(__('page.featured')) ?></h2>
   <div class="grid"><?php foreach ($products as $p) require __DIR__ . '/_card.php'; ?></div>
+  <?php if (!empty($used)): ?>
+    <h2 class="section-title"><a href="<?= e(path("$l/used")) ?>"><?= e(__('page.used')) ?></a></h2>
+    <div class="grid"><?php foreach ($used as $p) require __DIR__ . '/_card.php'; ?></div>
+  <?php endif; ?>
 </div>

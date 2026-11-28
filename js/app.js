@@ -133,12 +133,31 @@
   const errMsg = (e) => T(`err_${e.code}`) !== `err_${e.code}` ? T(`err_${e.code}`) : T('err_generic');
 
   // The session lives in an HttpOnly cookie; only the profile is kept here to draw the UI.
+  // Returns a promise: right after sign-in the guest cart and wishlist are merged into the account first.
   function setAuth(_token, user) {
+    const wasGuest = !S.user;
     S.user = user;
     if (user) store.set('user', user); else { store.del('user'); store.del('token'); }
-    if (user) syncWish();
     if (user && user.role !== 'customer') api('/me').then((me) => { S.adminPath = me.admin_path; renderMenu(); }).catch(() => {});
     renderMenu();
+    return user && wasGuest ? mergeGuest() : Promise.resolve();
+  }
+  // Guest cart + saved account cart → one cart (server adds same lines, caps to stock, drops sold-out items).
+  async function mergeGuest() {
+    const items = S.cart.map((i) => ({ id: i.id, variant_id: i.variant_id, qty: i.qty }));
+    const [c, w] = await Promise.all([
+      api('/cart/merge', { method: 'POST', body: { items } }).catch(() => null),
+      api('/wishlist/merge', { method: 'POST', body: { ids: S.wish } }).catch(() => null),
+    ]);
+    if (c) {
+      S.cart = c.items.map((it) => ({ id: it.id, variant_id: it.variant_id, variant_label: it.variant_label, qty: it.qty, name_ku: it.name_ku, name_ar: it.name_ar, name_en: it.name_en,
+        price: it.price, image: it.image, stock: it.stock, is_phone: !!it.is_phone }));
+      S.bundleOff = c.bundle_discount || 0;
+      store.set('cart', S.cart); updateCartBadge();
+      if ((c.notices || []).length) toast(T('mergeNotice', { x: c.notices.length }));
+      else if (c.items.length > items.length) toast(T('mergeAdded'));
+    }
+    if (w) saveWish(w.ids);
   }
 
   let toastTimer;
@@ -198,7 +217,7 @@
     el.innerHTML = `<div class="grab"></div>
       <div class="sheet-head"><h3><span class="hic" style="background:var(--green-soft);color:var(--green)">${I.check}</span>${T('addedTo')}</h3><button class="close-btn" data-close>${I.close}</button></div>
       <div class="section-title" style="margin-top:0;font-size:16px">${T('boughtTogether')}</div>
-      <div class="bundle-row">${items.map((b) => { productCache.set(b.id, b); return `<div class="bundle-item"><a href="${U(`product/${pkey(b)}`)}" data-close-nav><img src="${img(b.image)}" alt=""></a>
+      <div class="bundle-row">${items.map((b) => { productCache.set(b.id, b); return `<div class="bundle-item"><a href="${U(`product/${pkey(b)}`)}" data-close-nav><img src="${img(b.image)}" alt="" loading="lazy" decoding="async"></a>
         <div class="nm">${esc(L(b, 'name'))}</div><div class="bp">${money(b.price)}</div><button class="add-btn sm" data-add="${b.id}" aria-label="${esc(T('addToCart'))}">${I.plus}</button></div>`; }).join('')}</div>
       <a class="btn btn-primary" href="${U()}cart" data-close-nav>${I.basket}${T('viewCart')}</a>
       <button class="btn btn-soft" data-close>${T('continueShopping')}</button>`;
@@ -218,6 +237,7 @@
       <a href="#" data-open-cats>${T('categories')}</a>
       <a href="${U()}orders" data-nav="orders">${T('myOrders')}</a>
       <a href="${U()}repair" data-nav="repair">${T('repairTitle')}</a>
+      <a href="${U()}used" data-nav="used">${T('usedTitle')}</a>
       <a href="${U()}profile" data-nav="profile">${T('profile')}</a>`;
     const fl = document.querySelector('.footer-links');
     if (fl) fl.innerHTML = `<a href="${U()}faq">${T('faq')}</a> · <a href="${U()}support">${T('support')}</a>`;
@@ -255,6 +275,8 @@
           ${item(U('orders'), I.bag, 'p', T('myOrders'), route === 'orders')}
           ${item('#', I.search, 'y', T('search'), false, 'data-open-search')}
           ${item(U('finder'), I.spark, 'p', T('finderTitle'), route === 'finder')}
+          ${item(U('used'), I.swap, 'g', T('usedTitle'), route === 'used')}
+          ${item(U('accessories-finder'), I.shapes, 'b', T('accFinderTitle'), route === 'accessories-finder')}
           ${S.settings.tradein_enabled === '1' ? item(U('tradein'), I.swap, 'g', T('tiTitle'), route === 'tradein') : ''}
           ${S.settings.repair_enabled === '1' ? item(U('repair'), I.wrench, 'o', T('repairTitle'), route === 'repair' || route === 'repairs') : ''}
           ${item(U('faq'), I.help, 'b', T('faq'), route === 'faq')}
@@ -285,7 +307,9 @@
       <div class="grab"></div>
       <div class="sheet-head"><h3><span class="hic">${I.search}</span>${T('searchTitle')}</h3><button class="close-btn" data-close>${I.close}</button></div>
       <form id="searchForm">
-        <label class="search-box">${I.search}<input id="searchInput" type="search" placeholder="${esc(T('searchPh'))}" autocomplete="off"></label>
+        <label class="search-box">${I.search}<input id="searchInput" type="search" placeholder="${esc(T('searchPh'))}" autocomplete="off" enterkeyhint="search" aria-controls="suggestBox"></label>
+        <div id="suggestBox" class="suggest" role="listbox" aria-live="polite"></div>
+        <div id="recentBox"></div>
         <div class="chips"><span class="lbl">${I.wand}${T('trendingNow')}</span>${tags.map((t) => `<button type="button" class="chip" data-q="${esc(t)}">${esc(t)}</button>`).join('')}</div>
         <button class="btn btn-primary" type="submit">${I.search}${T('search')}</button>
         <button class="btn btn-soft" type="button" data-close>${T('close')}</button>
@@ -293,8 +317,49 @@
     $('#searchForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const q = $('#searchInput').value.trim();
-      if (q) { closePanels(); go(`search/${encodeURIComponent(q)}`); }
+      if (q) { addRecent(q); closePanels(); go(`search/${encodeURIComponent(q)}`); }
     });
+    drawRecent();
+    let timer; let seq = 0;
+    $('#searchInput').addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = $('#searchInput').value.trim();
+      if (q.length < 2) { $('#suggestBox').innerHTML = ''; drawRecent(); return; }
+      timer = setTimeout(async () => {
+        const my = ++seq;
+        const r = await api(`/search/suggest?q=${encodeURIComponent(q)}`).catch(() => null);
+        if (my !== seq || !r || !$('#suggestBox')) return;
+        $('#recentBox').innerHTML = '';
+        drawSuggest(r, q);
+      }, 220);
+    });
+    $('#searchSheet').addEventListener('click', (e) => {
+      const a = e.target.closest('[data-sg]'); if (a) addRecent($('#searchInput').value.trim() || a.dataset.sg);
+      const rq = e.target.closest('[data-recent]');
+      if (rq) { e.preventDefault(); addRecent(rq.dataset.recent); closePanels(); go(`search/${encodeURIComponent(rq.dataset.recent)}`); }
+      if (e.target.closest('[data-clear-recent]')) { e.preventDefault(); store.del('recent_q'); drawRecent(); }
+    });
+  }
+  // Recent searches: last 5 on this phone, clearable.
+  function addRecent(q) { q = String(q || '').trim().slice(0, 60); if (!q) return; store.set('recent_q', [q, ...store.get('recent_q', []).filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 5)); }
+  function drawRecent() {
+    const box = $('#recentBox'); if (!box) return;
+    const list = store.get('recent_q', []);
+    box.innerHTML = list.length ? `<div class="recent"><div class="recent-head"><span>${I.search}${T('recentSearches')}</span><button type="button" class="link-btn" data-clear-recent>${T('clearRecent')}</button></div>
+      <div class="chips">${list.map((q) => `<button type="button" class="chip" data-recent="${esc(q)}">${esc(q)}</button>`).join('')}</div></div>` : '';
+  }
+  function drawSuggest(r, q) {
+    const box = $('#suggestBox');
+    const mark = (text) => { const t = esc(text); const k = esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return k.length >= 2 ? t.replace(new RegExp(`(${k})`, 'ig'), '<mark>$1</mark>') : t; };
+    if (!r.products.length && !r.categories.length) { box.innerHTML = `<div class="sg-empty">${esc(T('noResultsFor', { x: q }))}</div>`; return; }
+    box.innerHTML = `${r.categories.length ? `<div class="sg-cats">${r.categories.map((c) => `<a class="chip" href="${U()}category/${c.id}" data-close-nav data-sg="${esc(c.name)}">${I.list}${esc(L(c, 'name'))}</a>`).join('')}</div>` : ''}
+      ${r.products.map((p) => `<a class="sg-item" role="option" href="${U(`product/${pkey(p)}`)}" data-close-nav data-sg="${esc(L(p, 'name'))}">
+        <img src="${img(p.image)}" alt="" loading="lazy" decoding="async" width="48" height="48">
+        <span class="sg-body"><span class="sg-name">${mark(L(p, 'name'))}</span>
+          <span class="sg-meta">${p.model_code ? `<span class="sg-code num ${p.code_match ? 'hit' : ''}" dir="ltr">${p.code_match ? mark(p.model_code) : esc(p.model_code)}</span>` : ''}${p.is_used ? `<span class="sg-used num">${esc(usedBadge(p))}</span>` : ''}
+            <span class="sg-stock ${p.stock > 0 ? 'in' : 'out'}">${T(p.stock > 0 ? 'inStock' : 'soldOut')}</span></span></span>
+        <span class="sg-price">${p.has_variants ? `<small>${T('from')}</small>` : ''}${money(p.price)}</span></a>`).join('')}
+      <button type="submit" class="btn btn-soft btn-block sg-all">${esc(T('viewAllResults', { x: q }))}</button>`;
   }
   function openSearch() { renderSearchSheet(); openPanel($('#searchSheet')); setTimeout(() => $('#searchInput').focus(), 250); }
 
@@ -305,8 +370,9 @@
     $('#catDrawer').innerHTML = `
       <div class="drawer-head"><h3><span style="color:var(--brand);width:28px;height:28px;display:inline-block">${I.shapes}</span>${T('categories')}</h3><button class="close-btn" data-close style="background:none">${I.close}</button></div>
       <div class="cat-layout">
-        <div class="cat-side">${cats.map((c) => `<button data-cat-side="${c.id}" class="${c.id === sel.id ? 'active' : ''}"><div class="img"><img src="${img(c.image)}" alt=""></div>${esc(L(c, 'name'))}</button>`).join('')}</div>
+        <div class="cat-side">${cats.map((c) => `<button data-cat-side="${c.id}" class="${c.id === sel.id ? 'active' : ''}"><div class="img"><img src="${img(c.image)}" alt="" loading="lazy" decoding="async"></div>${esc(L(c, 'name'))}</button>`).join('')}</div>
         <div class="cat-main">
+          <div class="cat-quick"><a href="${U()}used" data-close-nav>${I.swap}${T('usedTitle')}</a><a href="${U()}accessories-finder" data-close-nav>${I.shapes}${T('accFinderTitle')}</a></div>
           <a class="sub-item all" href="${U()}category/${sel.id}" data-close-nav>${esc(T('allOf', { x: L(sel, 'name') }))}<span>${I.arrow}</span></a>
           ${sel.children.map((s) => `<a class="sub-item" href="${U()}category/${s.id}" data-close-nav>${esc(L(s, 'name'))}<span class="cnt num">${s.count}</span><span>${I.chev}</span></a>`).join('')}
         </div>
@@ -344,14 +410,14 @@
   function saveWish(ids) { S.wish = [...new Set((ids || []).map(Number).filter(Boolean))]; store.set('wish', S.wish); }
   function syncWish() {
     if (!S.user) return;
-    api('/me/wishlist', { method: 'POST', body: { ids: S.wish } }).then((r) => saveWish(r.ids)).catch(() => {});
+    api('/wishlist/merge', { method: 'POST', body: { ids: S.wish } }).then((r) => saveWish(r.ids)).catch(() => {});
   }
   async function toggleWish(id, btn) {
     const on = !S.wish.includes(id);
     saveWish(on ? [...S.wish, id] : S.wish.filter((x) => x !== id));
     if (btn) { btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', String(on)); const sp = btn.querySelector('span'); if (sp) sp.textContent = T(on ? 'wishSaved' : 'wishAdd'); }
     toast(T(on ? 'wishSaved' : 'wishRemoved'));
-    if (S.user) { try { const r = await api(`/me/wishlist/${id}`, { method: on ? 'PUT' : 'DELETE' }); saveWish(r.ids); } catch { /* kept locally */ } }
+    if (S.user) { try { const r = await api('/wishlist/toggle', { method: 'POST', body: { product_id: id } }); saveWish(r.ids); } catch { /* kept locally */ } }
   }
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-wish]'); if (!b) return;
@@ -416,12 +482,16 @@
   }
 
   // ---------------- product card ----------------
-  function productCard(p) {
+  // "Used · A+ · 🔋 94%"
+  const usedBadge = (p) => (p && p.is_used ? [T('usedBadge'), p.condition_grade ? `${T('grade')} ${p.condition_grade}` : '', p.battery_health ? `🔋 ${p.battery_health}%` : ''].filter(Boolean).join(' · ') : '');
+  const FIT = { exact: 'fitExact', model: 'fitModel', universal: 'fitUniversal' };
+  function productCard(p, opt = {}) {
     productCache.set(p.id, p);
     const out = p.stock <= 0;
     const off = p.old_price && p.old_price > p.price ? Math.round((1 - p.price / p.old_price) * 100) : 0;
     // One badge at most (Baymard: badges only for meaningful differences); the discount sits next to the price.
     const badge = out ? `<span class="tag out">${T('soldOut')}</span>`
+      : p.is_used ? `<span class="tag used num">${esc(usedBadge(p))}</span>`
       : p.stock <= 3 ? `<span class="tag low">${T('lowStock')}</span>`
         : p.sold >= 20 ? `<span class="tag sold">${I.fire}${esc(T('soldN', { x: fmt(p.sold) }))}</span>`
           : p.trending ? `<span class="tag trend">${I.fire}${T('trending')}</span>` : '';
@@ -437,6 +507,7 @@
           ${p.brand ? `<div class="c-brand">${esc(p.brand)}</div>` : ''}
           <div class="nm">${bidiName(L(p, 'name'))}</div>
           ${spec ? `<div class="c-spec num">${esc(spec)}</div>` : ''}
+          ${opt.fit ? `<div class="fit-chip ${esc(opt.fit)}">${I.check}${T(FIT[opt.fit] || 'fitUniversal')}</div>` : ''}
           ${p.rating_count ? `<div class="c-rate">${I.star}<b class="num">${Number(p.rating_avg).toFixed(1)}</b><span class="num">(${p.rating_count})</span></div>` : ''}
           <div class="foot">
             <div class="prices">${p.has_variants ? `<small class="c-from">${T('from')}</small>` : ''}${money(p.price)}
@@ -457,7 +528,7 @@
     app.innerHTML = `
       <div class="cat-strip-wrap"><div class="container" style="padding:0"><div class="cat-strip">
         <a class="cat-chip active" href="${U()}"><div class="img">${I.shapes}</div>${T('all')}</a>
-        ${cats.map((c) => `<a class="cat-chip" href="${U()}category/${c.id}"><div class="img"><img src="${img(c.image)}" alt=""></div>${esc(L(c, 'name'))}</a>`).join('')}
+        ${cats.map((c) => `<a class="cat-chip" href="${U()}category/${c.id}"><div class="img"><img src="${img(c.image)}" alt="" loading="lazy" decoding="async"></div>${esc(L(c, 'name'))}</a>`).join('')}
       </div></div></div>
       <div class="container">
         <div id="slider"></div>
@@ -478,6 +549,8 @@
         </section>` : ''}
         <div class="promo-tiles">
           <a class="promo-tile finder" href="${U()}finder"><span class="pi">${I.spark}</span><b>${T('finderTitle')}</b></a>
+          <a class="promo-tile used" href="${U()}used"><span class="pi">${I.swap}</span><b>${T('usedTitle')}</b></a>
+          <a class="promo-tile acc" href="${U()}accessories-finder"><span class="pi">${I.shapes}</span><b>${myPhone() ? esc(T('accForX', { x: myPhone().model })) : T('accFinderTitle')}</b></a>
           ${S.settings.tradein_enabled === '1' ? `<a class="promo-tile swap" href="${U()}tradein"><span class="pi">${I.swap}</span><b>${T('tiTitle')}</b></a>` : ''}
         </div>
 
@@ -630,7 +703,7 @@
     const el = $('#slider'); if (!el || !banners.length) return;
     el.innerHTML = `<div class="slider">${banners.map((b, i) => `
       <a class="slide ${i === 0 ? 'active' : ''}" href="${esc(safeUrl(b.link) || U(''))}">
-        <img src="${img(b.image)}" alt="">
+        <img src="${img(b.image)}" alt="" ${i === 0 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">
         ${L(b, 'title') ? `<div class="caption">${L(b, 'tag') ? `<span class="tag" style="position:static">${esc(L(b, 'tag'))}</span>` : ''}<h3>${esc(L(b, 'title'))}</h3><p>${esc(L(b, 'subtitle'))}</p></div>` : ''}
       </a>`).join('')}
       ${banners.length > 1 ? `<div class="dots">${banners.map((_, i) => `<button class="${i === 0 ? 'active' : ''}" data-dot="${i}" aria-label="slide ${i + 1}"></button>`).join('')}</div>` : ''}
@@ -699,10 +772,85 @@
     bindFilters({ category: id });
   }
 
+  function viewUsed() {
+    app.innerHTML = `${pageHead(esc(T('usedTitle')))}
+      <div class="container" style="padding-top:12px">
+        <p class="used-intro">${T('usedIntro')}</p>
+        <div class="grade-row">${['A+', 'A', 'B', 'C'].map((g) => `<span class="grade-chip"><b class="grade g-${g.replace('+', 'p').toLowerCase()}">${g}</b>${esc(T(GRADE_KEY[g]).split(' — ')[0])}</span>`).join('')}</div>
+        ${filterRow()}<div id="grid">${gridSkeleton()}</div></div>`;
+    bindFilters({ used: '1' });
+  }
+
+  // ---------------- accessories for my phone ----------------
+  const myPhone = () => { const m = store.get('my_phone', null); return m && m.model ? m : null; };
+  const ACC_TYPES = { case: 'accCase', glass: 'accGlass', lens: 'accLens', charger: 'accCharger', cable: 'accCable', powerbank: 'accPowerbank', magsafe: 'accMagsafe', audio: 'accAudio', other: 'accOther' };
+  async function viewAccFinder() {
+    const params = new URLSearchParams(location.search);
+    let st = { brand: params.get('brand') || '', model: params.get('model') || '', type: params.get('type') || '' };
+    if (!st.model && myPhone()) st = { ...st, ...myPhone() };
+    let models = null;
+    const shell = (body) => `${pageHead(esc(T('accFinderTitle')))}<div class="container acc-finder" style="padding-top:12px">${body}</div>`;
+    const loadModels = async () => { if (!models) models = await api('/accessories/models').catch(() => ({ brands: [] })); return models; };
+
+    const stepBrand = async () => {
+      app.innerHTML = shell(`<p class="wz-sub">${T('accStep1')}</p><div class="spinner"></div>`);
+      const m = await loadModels();
+      if (!$('.acc-finder')) return;
+      $('.acc-finder').innerHTML = `<div class="wz-steps num">1 / 2</div><p class="wz-sub">${T('accStep1')}</p>
+        <div class="wz-options">${m.brands.map((b) => `<button class="wz-opt" data-brand="${esc(b.brand)}">${esc(b.brand)}<small class="num">${b.models.length}</small></button>`).join('')}</div>
+        ${m.brands.length ? '' : `<div class="empty"><p>${T('noResults')}</p></div>`}`;
+      $('.acc-finder').onclick = (e) => { const b = e.target.closest('[data-brand]'); if (b) { st.brand = b.dataset.brand; stepModel(); } };
+    };
+    const stepModel = async () => {
+      const m = await loadModels();
+      const list = (m.brands.find((b) => b.brand === st.brand) || { models: [] }).models;
+      app.innerHTML = shell(`<div class="wz-steps num">2 / 2</div><p class="wz-sub">${esc(T('accStep2', { x: st.brand }))}</p>
+        <form id="accModelForm" class="acc-model-form"><input class="input" id="accModel" list="accModels" autocomplete="off" placeholder="${esc(T('accModelPh'))}" value="${esc(st.model)}">
+          <datalist id="accModels">${list.map((x) => `<option value="${esc(x.label)}">`).join('')}</datalist><button class="btn btn-primary">${T('accShow')}</button></form>
+        <div class="wz-options models">${list.map((x) => `<button class="wz-opt" data-model="${esc(x.label)}">${esc(x.label)}</button>`).join('')}</div>
+        <button class="btn btn-soft" id="accBack" style="margin-top:12px">${T('back')}</button>`);
+      const pick = (model) => { if (!model.trim()) return; st.model = model.trim(); st.type = ''; store.set('my_phone', { brand: st.brand, model: st.model }); history.replaceState(null, '', U(`accessories-finder?${new URLSearchParams({ brand: st.brand, model: st.model })}`)); stepResults(); };
+      $('#accModelForm').onsubmit = (e) => { e.preventDefault(); pick($('#accModel').value); };
+      $('.acc-finder').onclick = (e) => { const b = e.target.closest('[data-model]'); if (b) pick(b.dataset.model); };
+      $('#accBack').onclick = () => { st.brand = ''; stepBrand(); };
+    };
+    const stepResults = async () => {
+      app.innerHTML = shell(`<div class="acc-head"><div><small>${T('accFor')}</small><b>${esc([st.brand, st.model].filter(Boolean).join(' '))}</b></div><button class="btn btn-soft sm" id="accChange">${T('accChange')}</button></div>
+        <div class="chips acc-types" id="accTypes"></div><div id="accGrid">${gridSkeleton(4)}</div>`);
+      $('#accChange').onclick = () => { store.del('my_phone'); st = { brand: '', model: '', type: '' }; history.replaceState(null, '', U('accessories-finder')); stepBrand(); };
+      const draw = async () => {
+        const r = await api(`/accessories/by-model?${new URLSearchParams({ brand: st.brand, model: st.model, category: st.type })}`).catch(() => null);
+        if (!$('#accGrid')) return;
+        if (!r) { $('#accGrid').innerHTML = `<div class="empty"><h3>${T('err_generic')}</h3></div>`; return; }
+        $('#accTypes').innerHTML = r.types.length > 1 || st.type ? `<button class="chip ${st.type ? '' : 'active'}" data-type="">${T('all')}</button>${r.types.map((t) => `<button class="chip ${st.type === t.type ? 'active' : ''}" data-type="${t.type}">${T(ACC_TYPES[t.type])} <small class="num">${t.n}</small></button>`).join('')}` : '';
+        $('#accGrid').innerHTML = r.items.length ? `<div class="grid acc-grid">${r.items.map((p) => productCard(p, { fit: p.fit })).join('')}</div>`
+          : `<div class="empty"><div class="ic sq">${I.shapes}</div><h3>${T('accNone')}</h3><p>${T('accNoneSub')}</p><a class="btn btn-primary" href="${U()}support">${I.headset}${T('support')}</a></div>`;
+      };
+      $('#accTypes').onclick = (e) => { const b = e.target.closest('[data-type]'); if (!b) return; st.type = b.dataset.type; draw(); };
+      draw();
+    };
+    if (st.model) stepResults(); else if (st.brand) stepModel(); else stepBrand();
+  }
+
   async function viewSearch(q) {
     app.innerHTML = `${pageHead(esc(T('resultsFor', { x: q })))}
       <div class="container" style="padding-top:16px">${filterRow()}<div id="grid">${gridSkeleton()}</div></div>`;
     bindFilters({ q });
+  }
+
+  const GRADE_KEY = { 'A+': 'gradeAplus', A: 'gradeA', B: 'gradeB', C: 'gradeC' };
+  function inspectionCard(p) {
+    const bh = Number(p.battery_health) || 0;
+    const notes = L(p, 'cosmetic_notes');
+    const yes = (on, label) => `<div class="ic-item ${on ? 'on' : 'off'}">${on ? I.check : I.close}<span>${label}</span></div>`;
+    return `<section class="inspect-card" aria-label="${esc(T('inspectTitle'))}">
+      <div class="ic-head"><b>${I.shield}${T('inspectTitle')}</b>${p.condition_grade ? `<span class="grade g-${esc(p.condition_grade.replace('+', 'p').toLowerCase())}">${esc(p.condition_grade)}</span>` : ''}</div>
+      ${p.condition_grade ? `<p class="ic-grade">${esc(T(GRADE_KEY[p.condition_grade] || 'gradeA'))}</p>` : ''}
+      ${bh ? `<div class="ic-bat"><span>${T('batteryHealth')}</span><b class="num">${bh}%</b><div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${bh}"><i style="width:${Math.min(100, bh)}%" class="${bh >= 90 ? 'hi' : bh >= 80 ? 'mid' : 'lo'}"></i></div></div>` : ''}
+      <div class="ic-grid">${yes(p.has_box, T('boxIncluded'))}${yes(p.has_charger, T('chargerIncluded'))}
+        <div class="ic-item ${p.used_warranty_days ? 'on' : 'off'}">${I.shield}<span>${p.used_warranty_days ? esc(T('shopWarrantyDays', { x: p.used_warranty_days })) : T('noShopWarranty')}</span></div></div>
+      ${notes ? `<p class="ic-notes">${esc(notes)}</p>` : ''}
+    </section>`;
   }
 
   async function viewProduct(id) {
@@ -730,7 +878,7 @@
               ${gallery.length > 1 ? `<div class="swipe-dots">${gallery.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}</div>
             ${vid && vidFile ? `<video class="pd-video" src="${esc(vid)}" controls preload="none" playsinline></video>` : ''}
             ${vid && !vidFile ? `<a class="video-btn" href="${esc(vid)}" target="_blank" rel="noopener">${I.play}<span>${T('watchVideo')}</span></a>` : ''}
-            ${gallery.length > 1 ? `<div class="thumbs">${gallery.map((g, i) => `<button class="${i === 0 ? 'active' : ''}" data-img="${img(g)}"><img src="${img(g)}" alt=""></button>`).join('')}</div>` : ''}
+            ${gallery.length > 1 ? `<div class="thumbs">${gallery.map((g, i) => `<button class="${i === 0 ? 'active' : ''}" data-img="${img(g)}"><img src="${img(g)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>` : ''}
           </div>
           <div class="card pd-info">
             ${p.brand ? `<div class="brand">${esc(p.brand)}</div>` : ''}
@@ -738,6 +886,7 @@
             <h1>${bidiName(L(p, 'name'))}</h1>
             ${p.rating_count ? `<button class="pd-rate" id="jumpRev">${stars(p.rating_avg)}<b class="num">${Number(p.rating_avg).toFixed(1)}</b><span>${esc(T('reviewsN', { x: p.rating_count }))}</span></button>` : ''}
             <div class="prices" id="pdPrice"></div>
+            ${p.is_used ? inspectionCard(p) : ''}
             <div class="deliv-line">${I.truck}<span>${T('deliveryLine')}${Number(S.settings.free_delivery_over) ? ` · ${esc(T('freeOverLine', { x: `${fmt(S.settings.free_delivery_over)} ${T('currency')}` }))}` : ''}</span></div>
             ${variants.length ? `<div class="variant-lbl">${T('chooseOption')}</div><div class="variants">${[...variants].sort((a, b) => b.price - a.price).map((v) => `<button class="variant ${v.stock <= 0 ? 'oos' : ''}" data-variant="${v.id}">${esc(v.label)}<small class="num">${fmt(v.price)}</small></button>`).join('')}</div>` : ''}
             <div class="stock" id="pdStock"></div>
@@ -755,14 +904,14 @@
               ${isPhone ? `<button class="share-mini" id="cmpBtn">${I.scale}${T('compareWith')}</button>` : ''}</div>
             ${trustStrip()}
             <div class="cashback-note hidden" id="pdCashback"></div>
-            ${(p.specs || []).length ? `<div class="pd-desc"><h3>${T('specs')}</h3><table class="specs">${p.specs.map((x) => `<tr><th>${esc(x.k)}</th><td dir="auto">${esc(x.v)}</td></tr>`).join('')}</table></div>` : ''}
+            ${(p.specs || []).length || p.model_code ? `<div class="pd-desc"><h3>${T('specs')}</h3><table class="specs">${p.model_code ? `<tr><th>${T('modelCode')}</th><td dir="ltr" class="num">${esc(p.model_code)}</td></tr>` : ''}${(p.specs || []).map((x) => `<tr><th>${esc(x.k)}</th><td dir="auto">${esc(x.v)}</td></tr>`).join('')}</table></div>` : ''}
             ${L(p, 'desc') ? `<div class="pd-desc"><h3>${T('description')}</h3><p>${esc(L(p, 'desc'))}</p></div>` : ''}
           </div>
         </div>
         ${bundleItems.length ? `<section class="card bundle-box">
           <h3>${I.gift}${T('bundleTitle')}</h3><p>${esc(T('bundleNote', { x: pct }))}</p>
-          <div class="bx-items"><div class="bx-item main"><img src="${img(p.image)}" alt=""><span>${T('thisItem')}</span></div>
-            ${bundleItems.map((b) => `<span class="bx-plus">+</span><label class="bx-item"><input type="checkbox" data-bx="${b.id}" checked><img src="${img(b.image)}" alt=""><span>${bidiName(L(b, 'name'))}</span>
+          <div class="bx-items"><div class="bx-item main"><img src="${img(p.image)}" alt="" loading="lazy" decoding="async"><span>${T('thisItem')}</span></div>
+            ${bundleItems.map((b) => `<span class="bx-plus">+</span><label class="bx-item"><input type="checkbox" data-bx="${b.id}" checked><img src="${img(b.image)}" alt="" loading="lazy" decoding="async"><span>${bidiName(L(b, 'name'))}</span>
               <small><s class="num">${fmt(b.price)}</s> <b class="num">${fmt(b.price - Math.floor((b.price * pct) / 100))}</b></small></label>`).join('')}</div>
           <div class="bx-foot"><div><div id="bxTotal"></div><div class="bx-save" id="bxSave"></div></div><button class="btn btn-primary" id="bxAdd">${I.basket}${T('bundleAdd')}</button></div>
         </section>` : ''}
@@ -892,7 +1041,7 @@
         <button type="button" class="btn btn-primary btn-block" id="rvSend">${T('submitReview')}</button></div>`);
     const drawStars = () => el.querySelectorAll('[data-star]').forEach((b) => b.classList.toggle('on', Number(b.dataset.star) <= rating));
     const drawPhotos = () => {
-      $('#rvUp').innerHTML = photos.map((u, i) => `<span class="rv-th"><img src="${img(u)}" alt=""><button type="button" data-rmph="${i}" aria-label="${esc(T('delete'))}">${I.close}</button></span>`).join('')
+      $('#rvUp').innerHTML = photos.map((u, i) => `<span class="rv-th"><img src="${img(u)}" alt="" loading="lazy" decoding="async"><button type="button" data-rmph="${i}" aria-label="${esc(T('delete'))}">${I.close}</button></span>`).join('')
         + (photos.length < 3 ? `<label class="rv-add">${I.plus}<span>${T('addPhotos')}</span><input type="file" accept="image/*" id="rvFile" hidden></label>` : '');
       const f = $('#rvFile');
       if (f) f.onchange = async () => {
@@ -928,7 +1077,7 @@
   async function pickPhone(exclude, onPick) {
     const list = (await api('/products?phones=1&limit=100').catch(() => [])).filter((x) => !exclude.includes(x.id));
     const el = openSheet(`<div class="sheet-head"><h3><span class="hic">${I.scale}</span>${T('pickPhone')}</h3><button class="close-btn" data-close>${I.close}</button></div>
-      <div class="pick-list">${list.map((x) => `<button type="button" class="pick-item" data-pick-id="${x.id}"><img src="${img(x.image)}" alt=""><span>${bidiName(L(x, 'name'))}</span>${money(x.price)}</button>`).join('')}</div>`);
+      <div class="pick-list">${list.map((x) => `<button type="button" class="pick-item" data-pick-id="${x.id}"><img src="${img(x.image)}" alt="" loading="lazy" decoding="async"><span>${bidiName(L(x, 'name'))}</span>${money(x.price)}</button>`).join('')}</div>`);
     el.onclick = (e) => { const b = e.target.closest('[data-pick-id]'); if (b) { closePanels(); onPick(Number(b.dataset.pickId)); } };
   }
   async function viewCompare(idsParam) {
@@ -954,7 +1103,7 @@
     app.innerHTML = `${pageHead(T('compareTitle'))}
       <div class="container"><div class="card cmp" style="--n:${prods.length}">
         <div class="cmp-cols">${prods.map((x, i) => `<div class="cmp-col">
-          <a href="${U(`product/${pkey(x)}`)}"><img src="${img(x.image)}" alt=""></a>
+          <a href="${U(`product/${pkey(x)}`)}"><img src="${img(x.image)}" alt="" loading="lazy" decoding="async"></a>
           <b class="cmp-nm">${bidiName(L(x, 'name'))}</b>${money(x.price)}
           <button class="add-btn cmp-add" data-add="${x.id}" ${x.stock <= 0 ? 'disabled' : ''} aria-label="${esc(T('addToCart'))}">${I.plus}</button>
           <button class="share-mini" data-chg="${i}">${I.scale}${T('changeBtn')}</button></div>`).join('')}</div>
@@ -1016,7 +1165,7 @@
       <div class="container cart-layout">
         <div>${S.cart.map((i) => `
           <div class="card cart-item">
-            <a href="${U(`product/${i.id}`)}"><img src="${img(i.image)}" alt=""></a>
+            <a href="${U(`product/${i.id}`)}"><img src="${img(i.image)}" alt="" loading="lazy" decoding="async"></a>
             <div class="info"><div class="nm">${esc(L(i, 'name'))}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}${money(i.price)}</div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
               <button class="rm-btn" data-rm="${esc(cartKey(i))}" aria-label="${esc(T('delete'))}">${I.trash}</button>
@@ -1226,7 +1375,7 @@
       const btn = form.querySelector('button[type=submit]'); btn.disabled = true;
       try {
         const r = await api('/auth/quick', { method: 'POST', body });
-        setAuth(r.token, r.user); store.del('ref');
+        await setAuth(r.token, r.user); store.del('ref');
         go(next ? `${next}` : U('profile'));
       } catch (err) { btn.disabled = false; $('#qcErr').innerHTML = errHtml(err); }
     };
@@ -1272,7 +1421,7 @@
       <button class="btn btn-primary btn-block" type="submit">${reg || reset ? T('sendCode') : T('login')}</button>
       <div class="switch-link">${reg ? T('haveAccount') : T('noAccount')} <a href="${U()}${reg ? 'login' : 'register'}${nextQ}">${reg ? T('login') : T('register')}</a></div>
     </form></div>`;
-    const finish = (r) => { setAuth(r.token, r.user); store.del('ref'); go(next ? `${next}` : U('profile')); };
+    const finish = async (r) => { await setAuth(r.token, r.user); store.del('ref'); go(next ? `${next}` : U('profile')); };
     $('#authForm').onsubmit = async (e) => {
       e.preventDefault();
       const fd = Object.fromEntries(new FormData(e.target));
@@ -1407,7 +1556,7 @@
     el.innerHTML = orders.map((o) => `
       <a class="card order-card" href="${U()}order/${o.id}">
         <div class="hd"><div><b>${esc(T('orderNo', { x: o.id }))}</b><div class="date">${esc(dateFmt(o.created_at))}</div></div><span class="st ${o.status}">${T(`st_${o.status}`)}</span></div>
-        <div class="order-thumbs">${o.items.slice(0, 5).map((i) => `<img src="${img(i.image)}" alt="">`).join('')}</div>
+        <div class="order-thumbs">${o.items.slice(0, 5).map((i) => `<img src="${img(i.image)}" alt="" loading="lazy" decoding="async">`).join('')}</div>
         <div class="ft"><span>${o.items.reduce((a, i) => a + i.qty, 0)} ${T('pcs')}</span>${money(o.total)}</div>
       </a>`).join('');
   }
@@ -1424,7 +1573,7 @@
         <div>
           ${o.status !== 'cancelled' ? `<div class="card" style="padding:18px 10px;margin-bottom:14px"><div class="timeline">${flow.map(([k, ic], i) => `<div class="step ${i <= idx ? 'done' : ''}"><div class="c">${ic}</div>${T(`st_${k}`)}</div>`).join('')}</div></div>` : ''}
           <div id="rateBox"></div>
-          ${o.items.map((i) => `<div class="card cart-item"><a href="${U(`product/${i.product_id}`)}"><img src="${img(i.image)}" alt=""></a><div class="info"><div class="nm">${esc(i.name)}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}<span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
+          ${o.items.map((i) => `<div class="card cart-item"><a href="${U(`product/${i.product_id}`)}"><img src="${img(i.image)}" alt="" loading="lazy" decoding="async"></a><div class="info"><div class="nm">${esc(i.name)}</div>${i.variant_label ? `<div class="vlabel">${esc(i.variant_label)}</div>` : ''}<span class="num">${fmt(i.price)} × ${i.qty}</span></div>${money(i.price * i.qty)}</div>`).join('')}
         </div>
         <div class="card summary">
           <div class="sum-row"><span>${T('name')}</span><b>${esc(o.customer_name)}</b></div>
@@ -1455,7 +1604,7 @@
     const todo = (await api('/me/to-review').catch(() => [])).filter((x) => o.items.some((i) => i.product_id === x.id));
     const el = $('#rateBox'); if (!el || !todo.length) { if (el) el.innerHTML = ''; return; }
     el.innerHTML = `<div class="card rate-box"><b>${I.star}${T('rateBuys')}</b><small>${T('rateBuysSub')}</small>
-      ${todo.map((x) => `<div class="rate-row"><img src="${img(x.image)}" alt=""><span>${bidiName(L(x, 'name'))}</span><button class="btn btn-primary" data-rate="${x.id}">${T('rateNow')}</button></div>`).join('')}</div>`;
+      ${todo.map((x) => `<div class="rate-row"><img src="${img(x.image)}" alt="" loading="lazy" decoding="async"><span>${bidiName(L(x, 'name'))}</span><button class="btn btn-primary" data-rate="${x.id}">${T('rateNow')}</button></div>`).join('')}</div>`;
     el.querySelectorAll('[data-rate]').forEach((b) => b.onclick = () => openReviewForm(Number(b.dataset.rate), null, () => drawRateBox(o)));
   }
 
@@ -1731,7 +1880,7 @@
           <small>${T('extraRejectedNote')}</small></div>` : ''}
         ${r.status !== 'cancelled' ? `<div class="card r-timeline">${flow.map((st, i) => `<div class="rt ${i <= cur ? 'done' : ''} ${i === cur ? 'cur' : ''}"><i></i><span>${T(`rs_${st}`)}</span></div>`).join('')}</div>` : ''}
         <div class="card r-comments" id="rComments"></div>
-        ${r.photos.length ? `<div class="card" style="padding:16px;margin-bottom:14px"><h3 style="margin:0 0 10px;font-size:16px">${T('photosTitle')}</h3><div class="r-photos">${r.photos.map((p) => `<a href="${img(p)}" target="_blank" rel="noopener"><img src="${img(p)}" alt=""></a>`).join('')}</div></div>` : ''}
+        ${r.photos.length ? `<div class="card" style="padding:16px;margin-bottom:14px"><h3 style="margin:0 0 10px;font-size:16px">${T('photosTitle')}</h3><div class="r-photos">${r.photos.map((p) => `<a href="${img(p)}" target="_blank" rel="noopener"><img src="${img(p)}" alt="" loading="lazy" decoding="async"></a>`).join('')}</div></div>` : ''}
         ${r.status === 'delivered' && r.warranty_until ? `<div class="card cert" id="cert"><div class="cert-hd">${I.shield}<b>${T('certTitle')}</b></div>
           <div class="cert-code num">${esc(r.code)}</div><div class="cert-dev">${esc(`${r.brand} ${r.model}`)} · ${esc(L(r.service, 'name'))} · ${T(`q_${r.quality}`)}</div>
           <div class="cert-valid ${valid ? 'ok' : 'no'}">${valid ? esc(T('validUntil', { x: r.warranty_until })) : T('expired')}</div>
@@ -1914,7 +2063,7 @@
       productCache.set(r.product.id, r.product);
       return `<div class="card fd-card ${r.best ? 'best' : ''}">
         ${r.best ? `<span class="fd-badge">${I.star}${T('bestPick')}</span>` : r.best_value ? `<span class="fd-badge value">${T('bestValue')}</span>` : ''}
-        <a href="${U(`product/${pkey(r.product)}`)}" class="fd-img"><img src="${img(r.product.image)}" alt=""></a>
+        <a href="${U(`product/${pkey(r.product)}`)}" class="fd-img"><img src="${img(r.product.image)}" alt="" loading="lazy" decoding="async"></a>
         <div class="fd-body">
           <div class="nm">${esc(L(r.product, 'name'))}${r.variant ? ` <span class="vlabel">${esc(r.variant.label)}</span>` : ''}</div>
           ${money(r.price)}
@@ -2017,6 +2166,8 @@
       case 'warranty': return viewWarranty(p1);
       case 'compare': return viewCompare(qs.get('ids'));
       case 'wishlist': return viewWishlist();
+      case 'used': return viewUsed();
+      case 'accessories-finder': return viewAccFinder();
       default: return viewHome();
     }
   }

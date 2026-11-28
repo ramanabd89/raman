@@ -115,11 +115,36 @@ final class SeoService
         $ld = ['@context' => 'https://schema.org', '@type' => 'Product', 'name' => self::L($p, 'name'), 'sku' => (string)$p['id'], 'image' => $imgs,
             'description' => mb_substr(self::L($p, 'desc') ?: self::L($p, 'name'), 0, 500),
             'offers' => ['@type' => 'Offer', 'price' => (string)(int)$p['price'], 'priceCurrency' => 'IQD', 'url' => self::pageUrl(Lang::current(), $path),
-                'availability' => $p['stock'] > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', 'itemCondition' => 'https://schema.org/NewCondition',
+                'availability' => $p['stock'] > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', 'itemCondition' => !empty($p['is_used']) ? 'https://schema.org/UsedCondition' : 'https://schema.org/NewCondition',
                 'seller' => ['@type' => 'Organization', 'name' => self::store()]]];
         if (!empty($p['brand'])) $ld['brand'] = ['@type' => 'Brand', 'name' => $p['brand']];
+        if (!empty($p['model_code'])) $ld['mpn'] = $p['model_code'];
+        if (!empty($p['is_used'])) {
+            $ld['itemCondition'] = 'https://schema.org/UsedCondition';
+            $props = [];
+            if (!empty($p['condition_grade'])) $props[] = ['@type' => 'PropertyValue', 'name' => 'Condition grade', 'value' => $p['condition_grade']];
+            if (!empty($p['battery_health'])) $props[] = ['@type' => 'PropertyValue', 'name' => 'Battery health', 'value' => (int)$p['battery_health'], 'unitText' => '%'];
+            if (!empty($p['used_warranty_days'])) $props[] = ['@type' => 'PropertyValue', 'name' => 'Shop warranty', 'value' => (int)$p['used_warranty_days'], 'unitText' => 'days'];
+            if ($props) $ld['additionalProperty'] = $props;
+        }
         if (!empty($p['rating_count'])) $ld['aggregateRating'] = ['@type' => 'AggregateRating', 'ratingValue' => (float)$p['rating_avg'], 'reviewCount' => (int)$p['rating_count'], 'bestRating' => 5, 'worstRating' => 1];
         return $ld;
+    }
+
+    /** /used page: the listed phones, each a Product in used condition with an IQD offer. */
+    public static function usedListLd(array $products): array
+    {
+        $items = [];
+        foreach (array_values($products) as $i => $p) {
+            $path = 'product/' . \App\Models\Product::urlKey($p);
+            $item = ['@type' => 'Product', 'name' => self::L($p, 'name'), 'url' => self::pageUrl(Lang::current(), $path), 'itemCondition' => 'https://schema.org/UsedCondition',
+                'offers' => ['@type' => 'Offer', 'price' => (string)(int)$p['price'], 'priceCurrency' => 'IQD', 'itemCondition' => 'https://schema.org/UsedCondition',
+                    'availability' => $p['stock'] > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock']];
+            if ($img = self::imageUrl($p['image'] ?? null)) $item['image'] = $img;
+            if (!empty($p['brand'])) $item['brand'] = ['@type' => 'Brand', 'name' => $p['brand']];
+            $items[] = ['@type' => 'ListItem', 'position' => $i + 1, 'item' => $item];
+        }
+        return ['@context' => 'https://schema.org', '@type' => 'ItemList', 'name' => __('page.used'), 'numberOfItems' => count($items), 'itemListElement' => $items];
     }
 
     public static function faqLd(array $faqs): array

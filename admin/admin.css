@@ -121,3 +121,12 @@ a.kpi { color: inherit; }
 .adm-lang button { flex: 1; padding: 6px 4px; border-radius: 8px; border: 1px solid var(--line, #ddd); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
 .adm-lang button.on { background: var(--brand, #f97316); color: #fff; border-color: transparent; }
 html[dir="ltr"] .adm-side { border-left: 0; }
+
+/* phase 2: used phone fields, compatible models tags */
+.used-box { background: #F0FDFA; border: 1.5px dashed #99F6E4; border-radius: 14px; padding: 10px 12px; }
+.used-fields[hidden] { display: none; }
+.used-fields textarea { min-height: 54px; resize: vertical; }
+.compat-box[hidden] { display: none; }
+.tag-input { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.tag-input .tg { display: inline-flex; align-items: center; gap: 4px; background: var(--blue-soft, #EAF0FE); color: var(--blue, #4C7CF0); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 13px; font-weight: 600; }
+.tag-input .tg button { width: 20px; height: 20px; border-radius: 50%; border: 0; background: rgba(0,0,0,.08); cursor: pointer; line-height: 1; }

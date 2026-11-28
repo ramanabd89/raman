@@ -8,6 +8,7 @@ use App\Core\RateLimiter;
 use App\Models\AuditLog;
 use App\Models\Product;
 use App\Models\Setting;
+use App\Services\CacheService;
 use App\Services\OtpiqService;
 use App\Services\TelegramService;
 
@@ -43,6 +44,15 @@ final class SettingController extends Controller
             if ($n) AuditLog::add($this->req, 'usd_reprice', ['products' => $n, 'rate' => Setting::get('usd_rate')]);
         }
         return Setting::forAdmin();
+    }
+
+    /** Admin → Settings → Speed: cache size and the "Clear cache" button. */
+    public function cache(): array { return CacheService::stats(); }
+    public function clearCache(): array
+    {
+        $n = CacheService::clear();
+        AuditLog::add($this->req, 'cache_clear', ['files' => $n]);
+        return ['cleared' => $n] + CacheService::stats();
     }
 
     /** "Send test OTP" — a real code to the given phone with the saved OTPIQ key / provider. */

@@ -39,6 +39,47 @@ final class Cart extends Model
         self::run('INSERT INTO carts(user_id, items, value, updated_at) VALUES(?,?,?,UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE items = VALUES(items), value = VALUES(value), updated_at = VALUES(updated_at)',
             [$userId, json_enc($slim), self::subtotal($items)]);
     }
+    /**
+     * Guest cart + the account's saved cart → one cart. Same product/variant lines are added together, each line is capped
+     * to what is in stock, and lines that are gone or sold out are dropped. Every change is reported in `notices`.
+     */
+    public static function merge(int $userId, $guest): array
+    {
+        return self::tx(function () use ($userId, $guest) {
+            $saved = self::one('SELECT items FROM carts WHERE user_id = ? FOR UPDATE', [$userId]);
+            $lines = []; $order = [];
+            foreach ([parse_json($saved['items'] ?? '[]', []), is_array($guest) ? array_slice($guest, 0, 50) : []] as $src) {
+                foreach ($src as $it) {
+                    if (!is_array($it) || toint($it['id'] ?? 0) <= 0) continue;
+                    $vid = !empty($it['variant_id']) ? toint($it['variant_id']) : null;
+                    $k = toint($it['id']) . ':' . ($vid ?? 0);
+                    if (!isset($lines[$k])) { $lines[$k] = ['id' => toint($it['id']), 'variant_id' => $vid, 'qty' => 0]; $order[] = $k; }
+                    $lines[$k]['qty'] += max(1, min(toint($it['qty'] ?? 1, 1), 99));
+                }
+            }
+            $items = []; $notices = [];
+            foreach ($order as $k) {
+                $want = $lines[$k]['qty'];
+                $priced = self::price([['id' => $lines[$k]['id'], 'variant_id' => $lines[$k]['variant_id'], 'qty' => min($want, 99)]])[0];
+                if (!$priced['available']) { $notices[] = ['id' => $priced['id'], 'variant_id' => $priced['variant_id'], 'reason' => 'unavailable']; continue; }
+                $label = ['id' => $priced['id'], 'variant_id' => $priced['variant_id'], 'name_ku' => $priced['name_ku'], 'name_ar' => $priced['name_ar'], 'name_en' => $priced['name_en'], 'variant_label' => $priced['variant_label']];
+                if ($priced['stock'] <= 0) { $notices[] = $label + ['reason' => 'out_of_stock']; continue; }
+                $qty = min($want, (int)$priced['stock'], 99);
+                if ($qty < $want) $notices[] = $label + ['reason' => 'reduced', 'qty_before' => $want, 'qty' => $qty];
+                $priced['qty'] = $qty;
+                $items[] = $priced;
+            }
+            $subtotal = self::subtotal($items);
+            if ($items) {
+                $slim = array_map(fn($i) => ['id' => $i['id'], 'variant_id' => $i['variant_id'], 'qty' => $i['qty']], $items);
+                self::run('INSERT INTO carts(user_id, items, value, updated_at) VALUES(?,?,?,UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE items = VALUES(items), value = VALUES(value), updated_at = VALUES(updated_at)',
+                    [$userId, json_enc($slim), $subtotal]);
+            } else self::run('DELETE FROM carts WHERE user_id = ?', [$userId]);
+            $bundle = Product::bundleDiscount(self::lines($items));
+            return ['items' => $items, 'subtotal' => $subtotal, 'bundle_discount' => $bundle, 'total' => max(0, $subtotal - $bundle), 'currency' => 'IQD', 'notices' => $notices];
+        });
+    }
+
     public static function abandoned(): array
     {
         $rows = self::all('SELECT c.*, u.name, u.phone, TIMESTAMPDIFF(SECOND, c.updated_at, UTC_TIMESTAMP()) / 3600 AS hours FROM carts c JOIN users u ON u.id = c.user_id ORDER BY c.updated_at DESC LIMIT 300');

@@ -90,8 +90,20 @@ CREATE TABLE IF NOT EXISTS `products` (
   `rating_count` BIGINT NOT NULL DEFAULT 0,
   `video_url` TEXT,
   `slug` VARCHAR(191),
+  `is_used` TINYINT(1) NOT NULL DEFAULT 0,
+  `condition_grade` ENUM('A+','A','B','C') NULL,
+  `battery_health` TINYINT UNSIGNED NULL,
+  `has_box` TINYINT(1) NOT NULL DEFAULT 0,
+  `has_charger` TINYINT(1) NOT NULL DEFAULT 0,
+  `used_warranty_days` INT UNSIGNED NOT NULL DEFAULT 0,
+  `cosmetic_notes_ku` TEXT NULL,
+  `cosmetic_notes_ar` TEXT NULL,
+  `cosmetic_notes_en` TEXT NULL,
+  `model_code` VARCHAR(60) NULL,
   PRIMARY KEY (`id`),
   KEY `idx_products_cat` (`category_id`),
+  KEY `idx_products_used` (`is_used`, `active`),
+  KEY `idx_products_model_code` (`model_code`),
   CONSTRAINT `fk_products_category_id` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -295,6 +307,7 @@ CREATE TABLE IF NOT EXISTS `tradeins` (
   `note` TEXT,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `listed_product_id` BIGINT NULL,
   PRIMARY KEY (`id`),
   CONSTRAINT `fk_tradeins_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -466,13 +479,24 @@ CREATE TABLE IF NOT EXISTS `otp_codes` (
   KEY `idx_otp_phone` (`phone`, `purpose`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `wishlist` (
+CREATE TABLE IF NOT EXISTS `wishlists` (
   `user_id` BIGINT NOT NULL,
   `product_id` BIGINT NOT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`user_id`, `product_id`),
-  CONSTRAINT `fk_wishlist_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_wishlist_product_id` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `uq_wishlists_user_product` (`user_id`, `product_id`),
+  KEY `idx_wishlists_product` (`product_id`),
+  CONSTRAINT `fk_wishlists_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_wishlists_product_id` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `product_compatibility` (
+  `product_id` BIGINT NOT NULL,
+  `model_key` VARCHAR(120) NOT NULL,
+  `label` VARCHAR(120) NOT NULL,
+  PRIMARY KEY (`product_id`, `model_key`),
+  KEY `idx_compat_model` (`model_key`),
+  CONSTRAINT `fk_compat_product_id` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX `idx_order_items_imei` ON `order_items` (`imei`);
